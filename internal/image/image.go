@@ -18,11 +18,14 @@ package image
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/sigstore/cosign/cmd/cosign/cli/rekor"
 	"github.com/sigstore/cosign/pkg/cosign"
 	"github.com/sigstore/cosign/pkg/oci"
+	"github.com/sigstore/cosign/pkg/policy"
 	"github.com/sigstore/cosign/pkg/signature"
 )
 
@@ -30,6 +33,12 @@ type imageValidator struct {
 	reference    name.Reference
 	checkOpts    cosign.CheckOpts
 	attestations []oci.Signature
+}
+
+type validatedImage struct {
+	Reference    name.Reference
+	Attestations []attestation
+	Signatures   []oci.Signature
 }
 
 // NewImageValidator constructs a new imageValidator with the provided parameters
@@ -79,6 +88,53 @@ func (i *imageValidator) ValidateAttestationSignature(ctx context.Context) error
 	i.attestations = attestations
 
 	return nil
+}
+
+func (i *imageValidator) ValidateImage(ctx context.Context) (*validatedImage, error) {
+	signatures, _, err := cosign.VerifyImageSignatures(ctx, i.reference, &i.checkOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	attestations, _, err := cosign.VerifyImageAttestations(ctx, i.reference, &i.checkOpts)
+	attStatements := make([]attestation, 0, len(attestations))
+	for _, att := range attestations {
+		attStatement, err := signatureToAttestation(ctx, att)
+		if err != nil {
+			return nil, err
+		}
+		attStatements = append(attStatements, attStatement)
+
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &validatedImage{
+		i.reference,
+		attStatements,
+		signatures,
+	}, nil
+
+}
+
+func signatureToAttestation(ctx context.Context, signature oci.Signature) (attestation, error) {
+	var att attestation
+	payload, err := policy.AttestationToPayloadJSON(ctx, "slsaprovenance", signature)
+	if err != nil {
+		return attestation{}, err
+	}
+
+	if len(payload) == 0 {
+		return attestation{}, errors.New("predicate (slsaprovenance) did not match the attestation.")
+	}
+
+	err = json.Unmarshal(payload, &att)
+	if err != nil {
+		return attestation{}, err
+	}
+
+	return att, nil
 }
 
 func (i *imageValidator) Attestations() []oci.Signature {
