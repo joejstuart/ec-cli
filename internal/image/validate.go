@@ -18,6 +18,11 @@ package image
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io/ioutil"
+	"os"
+	"path"
 
 	conftestOutput "github.com/open-policy-agent/conftest/output"
 	log "github.com/sirupsen/logrus"
@@ -73,6 +78,27 @@ func ValidateImage(ctx context.Context, imageRef, policyConfiguration, publicKey
 		return nil, err
 	}
 
+	attStatements := make([]attestation, 0, len(a.Attestations()))
+	for _, att := range a.Attestations() {
+		attStatement, err := SignatureToAttestation(ctx, att)
+		if err != nil {
+			return nil, err
+		}
+		attStatements = append(attStatements, attStatement)
+	}
+
+	inputDir, err := os.MkdirTemp("", "ec_input.*")
+	if err != nil {
+		log.Debug("Problem making temp dir!")
+		return nil, err
+	}
+	inputJSONPath := path.Join(inputDir, "commit.json")
+	signatures, err := writeCommitData(attStatements)
+	payloadJson, _ := json.Marshal(signatures)
+	_ = ioutil.WriteFile(inputJSONPath, payloadJson, 0644)
+
+	inputs = append(inputs, inputJSONPath)
+
 	results, err := a.Evaluator.Evaluate(ctx, inputs)
 
 	if err != nil {
@@ -84,4 +110,28 @@ func ValidateImage(ctx context.Context, imageRef, policyConfiguration, publicKey
 	out.SetPolicyCheck(results)
 
 	return out, nil
+}
+
+func writeCommitData(attestations []attestation) ([]*signOffSignature, error) {
+	payloads := make([]*signOffSignature, 0, len(attestations))
+	for _, att := range attestations {
+		signoffSource, err := att.NewSignOffSource()
+		if err != nil {
+			return nil, err
+		}
+		if signoffSource == nil {
+			return nil, errors.New("there is no signoff source in attestation")
+		}
+
+		signOff, err := signoffSource.GetSignOff()
+		if err != nil {
+			return nil, err
+		}
+
+		if signOff != nil {
+			payloads = append(payloads, signOff)
+		}
+	}
+	return payloads, nil
+
 }
