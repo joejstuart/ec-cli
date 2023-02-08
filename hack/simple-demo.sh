@@ -26,6 +26,7 @@ jCVQhnDYVWHvXhw6rgqGeg6NTUxIEhRQqQZaF9mcBotHkuYGJfYZbai+FA==
 
 POLICY_SOURCE="quay.io/hacbs-contract/ec-release-policy:latest"
 DATA_SOURCE="quay.io/hacbs-contract/ec-policy-data:latest"
+#DATA_SOURCE="quay.io/jstuart/ec-policies-data-bad:latest"
 
 #POLICY_SOURCE="github.com/hacbs-contract/ec-policies//policy"
 #DATA_SOURCE="github.com/hacbs-contract/ec-policies//data"
@@ -47,7 +48,7 @@ POLICY='{
     "exclude": [
     ],
     "include": [
-      "*"
+      "base_image_registries"
     ]
   }
 }'
