@@ -23,7 +23,7 @@ require (
 	github.com/sigstore/sigstore v1.5.2
 	github.com/stretchr/testify v1.8.2
 	github.com/tektoncd/cli v0.29.1
-	github.com/tektoncd/pipeline v0.42.0
+	github.com/tektoncd/pipeline v0.45.0
 	github.com/testcontainers/testcontainers-go v0.19.0
 	github.com/theupdateframework/go-tuf v0.5.2
 	github.com/transparency-dev/merkle v0.0.1
@@ -216,7 +216,7 @@ require (
 	k8s.io/klog/v2 v2.90.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20230109183929-3758b55a6596 // indirect
 	k8s.io/utils v0.0.0-20230115233650-391b47cb4029 // indirect
-	knative.dev/pkg v0.0.0-20221031202413-2f194914a4b2 // indirect
+	knative.dev/pkg v0.0.0-20221123011842-b78020c16606 // indirect
 	sigs.k8s.io/controller-runtime v0.14.1 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
