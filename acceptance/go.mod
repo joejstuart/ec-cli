@@ -20,10 +20,10 @@ require (
 	github.com/redhat-appstudio/application-api v0.0.0-20230309195839-6e0986f52132
 	github.com/sigstore/cosign/v2 v2.0.0
 	github.com/sigstore/rekor v1.0.1
-	github.com/sigstore/sigstore v1.5.2
+	github.com/sigstore/sigstore v1.6.0
 	github.com/stretchr/testify v1.8.2
 	github.com/tektoncd/cli v0.30.0
-	github.com/tektoncd/pipeline v0.44.0
+	github.com/tektoncd/pipeline v0.46.0
 	github.com/testcontainers/testcontainers-go v0.19.0
 	github.com/theupdateframework/go-tuf v0.5.2
 	github.com/transparency-dev/merkle v0.0.1
@@ -160,7 +160,7 @@ require (
 	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/prometheus/statsd_exporter v0.21.0 // indirect
 	github.com/sassoftware/relic v0.0.0-20210427151427-dfb082b79b74 // indirect
-	github.com/secure-systems-lab/go-securesystemslib v0.4.0 // indirect
+	github.com/secure-systems-lab/go-securesystemslib v0.5.0 // indirect
 	github.com/sergi/go-diff v1.2.0 // indirect
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/sigstore/timestamp-authority v0.2.1 // indirect
@@ -191,7 +191,7 @@ require (
 	go.uber.org/multierr v1.9.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.7.0 // indirect
-	golang.org/x/exp v0.0.0-20221031165847-c99f073a8326 // indirect
+	golang.org/x/exp v0.0.0-20230307190834-24139beb5833 // indirect
 	golang.org/x/mod v0.9.0 // indirect
 	golang.org/x/net v0.8.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
@@ -217,7 +217,7 @@ require (
 	k8s.io/klog/v2 v2.90.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20230109183929-3758b55a6596 // indirect
 	k8s.io/utils v0.0.0-20230115233650-391b47cb4029 // indirect
-	knative.dev/pkg v0.0.0-20221123011842-b78020c16606 // indirect
+	knative.dev/pkg v0.0.0-20230221145627-8efb3485adcf // indirect
 	sigs.k8s.io/controller-runtime v0.14.1 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
