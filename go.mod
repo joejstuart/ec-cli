@@ -25,14 +25,14 @@ require (
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.2
 	github.com/stuart-warren/yamlfmt v0.1.2
-	github.com/tektoncd/pipeline v0.42.0
-	golang.org/x/exp v0.0.0-20220823124025-807a23277127
+	github.com/tektoncd/pipeline v0.46.0
+	golang.org/x/exp v0.0.0-20230307190834-24139beb5833
 	golang.org/x/net v0.8.0
 	golang.org/x/tools v0.7.0
 	k8s.io/apimachinery v0.26.3
 	k8s.io/client-go v0.26.3
 	k8s.io/klog/v2 v2.90.1
-	k8s.io/kubernetes v1.26.3
+	k8s.io/kubernetes v1.15.0-alpha.0
 	sigs.k8s.io/yaml v1.3.0
 )
 
@@ -165,7 +165,7 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-getter v1.7.0 // indirect
 	github.com/hashicorp/go-hclog v1.4.0 // indirect
-	github.com/hashicorp/go-retryablehttp v0.7.1 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.2 // indirect
 	github.com/hashicorp/go-safetemp v1.0.0 // indirect
 	github.com/hashicorp/go-version v1.6.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
@@ -251,12 +251,12 @@ require (
 	github.com/zclconf/go-cty v1.10.0 // indirect
 	go.mongodb.org/mongo-driver v1.10.3 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/otel v1.13.0 // indirect
-	go.opentelemetry.io/otel/trace v1.13.0 // indirect
+	go.opentelemetry.io/otel v1.14.0 // indirect
+	go.opentelemetry.io/otel/trace v1.14.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
-	golang.org/x/crypto v0.6.0 // indirect
+	golang.org/x/crypto v0.7.0 // indirect
 	golang.org/x/mod v0.9.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
@@ -282,7 +282,7 @@ require (
 	k8s.io/component-base v0.26.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20221012153701-172d655c2280 // indirect
 	k8s.io/utils v0.0.0-20230115233650-391b47cb4029 // indirect
-	knative.dev/pkg v0.0.0-20221031202413-2f194914a4b2 // indirect
+	knative.dev/pkg v0.0.0-20230221145627-8efb3485adcf // indirect
 	muzzammil.xyz/jsonc v1.0.0 // indirect
 	olympos.io/encoding/edn v0.0.0-20201019073823-d3554ca0b0a3 // indirect
 	oras.land/oras-go/v2 v2.0.0 // indirect
