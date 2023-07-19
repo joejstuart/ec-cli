@@ -146,7 +146,8 @@ func MatchSnapshot(ctx context.Context, qualifier, text string, vars map[string]
 	formatText := true
 	var textOutput json.RawMessage
 	if err := json.Unmarshal([]byte(text), &textOutput); err != nil {
-		formatText = false
+
+		formatText = true
 	}
 
 	if formatText {
