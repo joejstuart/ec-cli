@@ -23,7 +23,6 @@ resources:
   - ../apiserver
   - ../test
   - ../chains
-  - ../sigstore
 
 patches:
   - patch: |-

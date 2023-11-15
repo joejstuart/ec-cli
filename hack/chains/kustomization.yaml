@@ -29,9 +29,9 @@ patches:
       data:
         artifacts.oci.storage: oci
         artifacts.pipelinerun.format: in-toto
-        artifacts.pipelinerun.storage: oci
+        artifacts.pipelinerun.storage: tekton
         artifacts.taskrun.format: in-toto
-        artifacts.taskrun.storage: oci
+        artifacts.taskrun.storage: tekton
 
 generators:
   - chains.yaml
