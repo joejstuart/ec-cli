@@ -121,12 +121,12 @@ spec:
 
   steps:
     - name: version
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       command: [ec]
       args:
         - version
     - name: initialize-tuf
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       script: |-
         set -euo pipefail
 
@@ -142,7 +142,7 @@ spec:
         - name: TUF_MIRROR
           value: "$(params.TUF_MIRROR)"
     - name: validate
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       command: [ec]
       args:
         - validate
@@ -190,23 +190,23 @@ spec:
         limits:
           memory: 2Gi
     - name: report
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       command: [cat]
       args:
         - "$(params.HOMEDIR)/report.yaml"
     - name: report-json
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       command: [cat]
       args:
         - "$(params.HOMEDIR)/report-json.json"
     - name: summary
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       command: [jq]
       args:
         - "."
         - "$(results.TEST_OUTPUT.path)"
     - name: assert
-      image: quay.io/jstuart/ec-cli@sha256:cecde322756f94d3e16bd3a43f1c8f9865888d6cbe755c492fcd4cd12f9fa0ec
+      image: quay.io/jstuart/ec-cli@sha256:7f9323bb7f0086bd26352f4c3c6f76deb067c7c69a0f102de1c7409b0605a4f1
       command: [jq]
       args:
         - "--argjson"
