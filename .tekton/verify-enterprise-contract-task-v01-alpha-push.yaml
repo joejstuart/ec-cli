@@ -11,9 +11,9 @@ metadata:
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: ec-release-debugging
-    appstudio.openshift.io/component: verify-enterprise-contract-task
+    appstudio.openshift.io/component: verify-enterprise-contract-task-v01-alpha
     pipelines.appstudio.openshift.io/type: build
-  name: verify-enterprise-contract-task-on-push
+  name: verify-enterprise-contract-task-v01-alpha-on-push
   namespace: rhtap-contract-tenant
 spec:
   params:
@@ -24,7 +24,7 @@ spec:
   - name: image-expires-after
     value: 5d
   - name: output-image
-    value: quay.io/jstuart/verify-enterprise-contract-task:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/rhtap-contract-tenant/ec-v01-alpha/verify-enterprise-contract-task-v01-alpha:{{revision}}
   - name: path-context
     value: .
   - name: revision
