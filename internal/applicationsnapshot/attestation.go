@@ -49,3 +49,7 @@ func (r *Report) attestations() ([]in_toto.Statement, error) {
 	}
 	return statements, nil
 }
+
+func toString() string {
+	return "attestation"
+}
