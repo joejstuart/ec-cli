@@ -161,8 +161,7 @@ type conftestEvaluator struct {
 	dataDir       string
 	policyDir     string
 	policy        ConfigProvider
-	include       []string
-	exclude       []string
+	criteria      Criteria
 	fs            afero.Fs
 	namespace     []string
 }
@@ -246,12 +245,12 @@ func (r conftestRunner) Run(ctx context.Context, fileList []string) (result []Ou
 
 // NewConftestEvaluator returns initialized conftestEvaluator implementing
 // Evaluator interface
-func NewConftestEvaluator(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source) (Evaluator, error) {
-	return NewConftestEvaluatorWithNamespace(ctx, policySources, p, source, nil)
+func NewConftestEvaluator(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, criteria Criteria) (Evaluator, error) {
+	return NewConftestEvaluatorWithNamespace(ctx, policySources, p, criteria, nil)
 }
 
 // set the policy namespace
-func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, namespace []string) (Evaluator, error) {
+func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, criteria Criteria, namespace []string) (Evaluator, error) {
 	fs := utils.FS(ctx)
 	c := conftestEvaluator{
 		policySources: policySources,
@@ -259,9 +258,8 @@ func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []sour
 		policy:        p,
 		fs:            fs,
 		namespace:     namespace,
+		criteria:      criteria,
 	}
-
-	c.include, c.exclude = computeIncludeExclude(source, p)
 
 	dir, err := utils.CreateWorkDir(fs)
 	if err != nil {
@@ -323,7 +321,7 @@ func (r *policyRules) collect(a *ast.AnnotationsRef) error {
 	return nil
 }
 
-func (c conftestEvaluator) Evaluate(ctx context.Context, inputs []string) ([]Outcome, Data, error) {
+func (c conftestEvaluator) Evaluate(ctx context.Context, input EvaluationTarget) ([]Outcome, Data, error) {
 	var results []Outcome
 
 	// hold all rule annotations from all policy sources
@@ -403,9 +401,9 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, inputs []string) ([]Out
 	}
 
 	log.Debugf("runner: %#v", r)
-	log.Debugf("inputs: %#v", inputs)
+	log.Debugf("inputs: %#v", input.inputs)
 
-	runResults, data, err := r.Run(ctx, inputs)
+	runResults, data, err := r.Run(ctx, input.inputs)
 	if err != nil {
 		// TODO do we want to evaluate further policies instead of erroring out?
 		return nil, nil, err
@@ -774,8 +772,8 @@ func isResultEffective(failure Result, now time.Time) bool {
 // discarded based on the policy configuration.
 func (c conftestEvaluator) isResultIncluded(result Result) bool {
 	ruleMatchers := makeMatchers(result)
-	includeScore := scoreMatches(ruleMatchers, c.include)
-	excludeScore := scoreMatches(ruleMatchers, c.exclude)
+	includeScore := scoreMatches(ruleMatchers, c.criteria.include)
+	excludeScore := scoreMatches(ruleMatchers, c.criteria.exclude)
 	return includeScore > excludeScore
 }
 
@@ -946,63 +944,4 @@ func strictCapabilities(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return string(blob), nil
-}
-
-func computeIncludeExclude(src ecc.Source, p ConfigProvider) ([]string, []string) {
-	var include, exclude []string
-
-	sc := src.Config
-
-	// The lines below take care to make a copy of the includes/excludes slices in order
-	// to ensure mutations are not unexpectedly propagated.
-	if sc != nil && (len(sc.Include) != 0 || len(sc.Exclude) != 0) {
-		include = append(include, sc.Include...)
-		exclude = append(exclude, sc.Exclude...)
-	}
-
-	vc := src.VolatileConfig
-	if vc != nil {
-		at := p.EffectiveTime()
-		filter := func(items []string, criteria []ecc.VolatileCriteria) []string {
-			for _, c := range criteria {
-				from, err := time.Parse(time.RFC3339, c.EffectiveOn)
-				if err != nil {
-					if c.EffectiveOn != "" {
-						log.Warnf("unable to parse time for criteria %q, was given %q: %v", c.Value, c.EffectiveOn, err)
-					}
-					from = at
-				}
-				until, err := time.Parse(time.RFC3339, c.EffectiveUntil)
-				if err != nil {
-					if c.EffectiveUntil != "" {
-						log.Warnf("unable to parse time for criteria %q, was given %q: %v", c.Value, c.EffectiveUntil, err)
-					}
-					until = at
-				}
-				if until.Compare(at) >= 0 && from.Compare(at) <= 0 {
-					items = append(items, c.Value)
-				}
-			}
-
-			return items
-		}
-
-		include = filter(include, vc.Include)
-		exclude = filter(exclude, vc.Exclude)
-	}
-
-	if policyConfig := p.Spec().Configuration; len(include) == 0 && len(exclude) == 0 && policyConfig != nil {
-		include = append(include, policyConfig.Include...)
-		exclude = append(exclude, policyConfig.Exclude...)
-		// If the old way of specifying collections are used, convert them.
-		for _, collection := range policyConfig.Collections {
-			include = append(include, fmt.Sprintf("@%s", collection))
-		}
-	}
-
-	if len(include) == 0 {
-		include = []string{"*"}
-	}
-
-	return include, exclude
 }

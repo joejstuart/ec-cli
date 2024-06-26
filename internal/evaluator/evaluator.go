@@ -20,8 +20,13 @@ import (
 	"context"
 )
 
+type EvaluationTarget struct {
+	Component string
+	Inputs    []string
+}
+
 type Evaluator interface {
-	Evaluate(ctx context.Context, inputs []string) ([]Outcome, Data, error)
+	Evaluate(ctx context.Context, input EvaluationTarget) ([]Outcome, Data, error)
 
 	// Destroy performs any cleanup needed
 	Destroy()
