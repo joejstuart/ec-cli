@@ -45,6 +45,7 @@ import (
 type imageValidationFunc func(context.Context, app.SnapshotComponent, policy.Policy, []evaluator.Evaluator, bool) (*output.Output, error)
 
 var newConftestEvaluator = evaluator.NewConftestEvaluator
+var newCriteria = evaluator.NewImageCriteria
 
 func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 	data := struct {
@@ -285,28 +286,32 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 			appComponents := data.spec.Components
 			evaluators := []evaluator.Evaluator{}
 
-			// Return an evaluator for each of these
-			for _, sourceGroup := range data.policy.Spec().Sources {
-				// Todo: Make each fetch run concurrently
-				log.Debugf("Fetching policy source group '%s'", sourceGroup.Name)
-				policySources, err := source.FetchPolicySources(sourceGroup)
-				if err != nil {
-					log.Debugf("Failed to fetch policy source group '%s'!", sourceGroup.Name)
-					return err
-				}
+			imageEvaluators := map[string][]evaluator.Evaluator{}
+			for _, comp := range appComponents {
+				// Return an evaluator for each of these
+				for _, sourceGroup := range data.policy.Spec().Sources {
+					// Todo: Make each fetch run concurrently
+					log.Debugf("Fetching policy source group '%s'", sourceGroup.Name)
+					policySources, err := source.FetchPolicySources(sourceGroup)
+					if err != nil {
+						log.Debugf("Failed to fetch policy source group '%s'!", sourceGroup.Name)
+						return err
+					}
 
-				for _, policySource := range policySources {
-					log.Debugf("policySource: %#v", policySource)
-				}
+					for _, policySource := range policySources {
+						log.Debugf("policySource: %#v", policySource)
+					}
 
-				c, err := newConftestEvaluator(cmd.Context(), policySources, data.policy, sourceGroup)
-				if err != nil {
-					log.Debug("Failed to initialize the conftest evaluator!")
-					return err
-				}
+					criteria := newCriteria(sourceGroup, data.policy, comp.ContainerImage)
+					c, err := newConftestEvaluator(cmd.Context(), policySources, data.policy, criteria)
+					if err != nil {
+						log.Debug("Failed to initialize the conftest evaluator!")
+						return err
+					}
 
-				evaluators = append(evaluators, c)
-				defer c.Destroy()
+					imageEvaluators[comp.ContainerImage] = append(imageEvaluators[comp.ContainerImage], c)
+					defer c.Destroy()
+				}
 			}
 
 			// worker is responsible for processing one component at a time from the jobs channel,
@@ -316,7 +321,8 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 				for comp := range jobs {
 					log.Debugf("Worker %d got a component %q", id, comp.ContainerImage)
 					ctx := cmd.Context()
-					out, err := validate(ctx, comp, data.policy, evaluators, data.info)
+					imageEvaluator := imageEvaluators[comp.ContainerImage]
+					out, err := validate(ctx, comp, data.policy, imageEvaluator, data.info)
 					res := result{
 						err: err,
 						component: applicationsnapshot.Component{
