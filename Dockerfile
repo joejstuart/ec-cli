@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.3@sha256:582e18f13291d7c686ec4e6e92d20b24c62ae0fc72767c46f30a69b1a6198055 AS downloads
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4-1194@sha256:104cf11d890aeb7dd5728b7d7732e175a0e4018f1bb00d2faebcc8f6bf29bd52 AS downloads
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -29,7 +29,7 @@ RUN cd /opt && \
     mv cosign-$TARGETOS-$TARGETARCH cosign && \
     chmod +x cosign
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.3@sha256:582e18f13291d7c686ec4e6e92d20b24c62ae0fc72767c46f30a69b1a6198055
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4-1194@sha256:104cf11d890aeb7dd5728b7d7732e175a0e4018f1bb00d2faebcc8f6bf29bd52
 
 ARG TARGETOS
 ARG TARGETARCH
