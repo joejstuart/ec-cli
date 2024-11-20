@@ -279,6 +279,15 @@ func (r conftestRunner) Run(ctx context.Context, fileList []string) (result []Ou
 		err = fmt.Errorf("could not retrieve data from the policy engine: Data is: %v", d)
 	}
 
+	// jsonData, err := json.MarshalIndent(data, "", "  ")
+	// if err != nil {
+	// 	fmt.Println("Error pretty printing map:", err)
+	// 	return
+	// }
+	// fmt.Println(engine.Documents())
+	// fmt.Println("breaker")
+	// fmt.Println(string(jsonData))
+
 	return
 }
 

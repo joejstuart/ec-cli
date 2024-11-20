@@ -42,7 +42,7 @@ import (
 	validate_utils "github.com/enterprise-contract/ec-cli/internal/validate"
 )
 
-type imageValidationFunc func(context.Context, app.SnapshotComponent, *app.SnapshotSpec, policy.Policy, []evaluator.Evaluator, bool) (*output.Output, error)
+type imageValidationFunc func(context.Context, app.SnapshotComponent, *app.SnapshotSpec, policy.Policy, map[string]evaluator.Evaluator, bool) (*output.Output, error)
 
 var newConftestEvaluator = evaluator.NewConftestEvaluator
 
@@ -301,12 +301,12 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 			type result struct {
 				err         error
 				component   applicationsnapshot.Component
-				data        []evaluator.Data
+				data        map[string]evaluator.Data
 				policyInput []byte
 			}
 
 			appComponents := data.spec.Components
-			evaluators := []evaluator.Evaluator{}
+			evaluators := map[string]evaluator.Evaluator{}
 
 			// Return an evaluator for each of these
 			for _, sourceGroup := range data.policy.Spec().Sources {
@@ -324,7 +324,7 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 					return err
 				}
 
-				evaluators = append(evaluators, c)
+				evaluators[sourceGroup.Name] = c
 				defer c.Destroy()
 			}
 
@@ -343,6 +343,7 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 					}
 
 					log.Debugf("Worker %d got a component %q", id, comp.ContainerImage)
+
 					out, err := validate(ctx, comp, data.spec, data.policy, evaluators, data.info)
 					res := result{
 						err: err,
@@ -366,8 +367,8 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 						res.component.Signatures = out.Signatures
 						res.component.Attestations = out.Attestations
 						res.component.ContainerImage = out.ImageURL
-						res.data = out.Data
 						res.component.Attestations = out.Attestations
+						res.data = out.Data
 						res.policyInput = out.PolicyInput
 					}
 					res.component.Success = err == nil && len(res.component.Violations) == 0
@@ -400,7 +401,8 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 			close(jobs)
 
 			var components []applicationsnapshot.Component
-			var manyData [][]evaluator.Data
+			var manyData []evaluator.Data
+			sgData := make(map[string]evaluator.Data)
 			var manyPolicyInput [][]byte
 			var allErrors error = nil
 			for i := 0; i < numComponents; i++ {
@@ -409,12 +411,17 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 					e := fmt.Errorf("error validating image %s of component %s: %w", r.component.ContainerImage, r.component.Name, r.err)
 					allErrors = errors.Join(allErrors, e)
 				} else {
+					for key, val := range r.data {
+						sgData[key] = val
+					}
 					components = append(components, r.component)
-					manyData = append(manyData, r.data)
 					manyPolicyInput = append(manyPolicyInput, r.policyInput)
 				}
 			}
 			close(results)
+			for _, val := range sgData {
+				manyData = append(manyData, val)
+			}
 			if allErrors != nil {
 				return allErrors
 			}

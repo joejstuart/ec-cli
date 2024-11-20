@@ -36,7 +36,7 @@ import (
 
 // ValidateImage executes the required method calls to evaluate a given policy
 // against a given image url.
-func ValidateImage(ctx context.Context, comp app.SnapshotComponent, snap *app.SnapshotSpec, p policy.Policy, evaluators []evaluator.Evaluator, detailed bool) (*output.Output, error) {
+func ValidateImage(ctx context.Context, comp app.SnapshotComponent, snap *app.SnapshotSpec, p policy.Policy, evaluators map[string]evaluator.Evaluator, detailed bool) (*output.Output, error) {
 	if trace.IsEnabled() {
 		region := trace.StartRegion(ctx, "ec:validate-image")
 		defer region.End()
@@ -45,7 +45,7 @@ func ValidateImage(ctx context.Context, comp app.SnapshotComponent, snap *app.Sn
 
 	log.Debugf("Validating image %s", comp.ContainerImage)
 
-	out := &output.Output{ImageURL: comp.ContainerImage, Detailed: detailed, Policy: p}
+	out := &output.Output{ImageURL: comp.ContainerImage, Detailed: detailed, Policy: p, Data: make(map[string]evaluator.Data)}
 	a, err := application_snapshot_image.NewApplicationSnapshotImage(ctx, comp, p, *snap)
 	if err != nil {
 		log.Debug("Failed to create application snapshot image!")
@@ -114,7 +114,7 @@ func ValidateImage(ctx context.Context, comp app.SnapshotComponent, snap *app.Sn
 
 	var allResults []evaluator.Outcome
 
-	for _, e := range evaluators {
+	for sourceGroup, e := range evaluators {
 		// Todo maybe: Handle each one concurrently
 		target := evaluator.EvaluationTarget{Inputs: []string{inputPath}}
 		if digest, err := a.ResolveDigest(ctx); err != nil {
@@ -130,7 +130,7 @@ func ValidateImage(ctx context.Context, comp app.SnapshotComponent, snap *app.Sn
 			return nil, err
 		}
 		allResults = append(allResults, results...)
-		out.Data = append(out.Data, data)
+		out.Data[sourceGroup] = data
 	}
 
 	out.PolicyInput = inputJSON

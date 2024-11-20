@@ -141,7 +141,7 @@ func TestBuiltinChecks(t *testing.T) {
 			p, err := policy.NewOfflinePolicy(ctx, policy.Now)
 			assert.NoError(t, err)
 
-			evaluators := []evaluator.Evaluator{}
+			evaluators := map[string]evaluator.Evaluator{}
 			snap := app.SnapshotSpec{
 				Components: []app.SnapshotComponent{
 					{
@@ -329,7 +329,7 @@ func TestEvaluatorLifecycle(t *testing.T) {
 
 	// e.Destroy() should not be invoked
 
-	evaluators := []evaluator.Evaluator{e}
+	evaluators := map[string]evaluator.Evaluator{"source1": e}
 
 	snap := app.SnapshotSpec{
 		Components: []app.SnapshotComponent{

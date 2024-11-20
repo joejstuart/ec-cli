@@ -64,7 +64,7 @@ var rootArgs = []string{
 }
 
 func happyValidator() imageValidationFunc {
-	return func(ctx context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, p policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
+	return func(ctx context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, p policy.Policy, _ map[string]evaluator.Evaluator, _ bool) (*output.Output, error) {
 		// simulate fetching of sources
 		for _, src := range p.Spec().Sources {
 			for _, url := range source.PolicySourcesFrom(src) {
@@ -443,7 +443,7 @@ func Test_ValidateImageCommandImages(t *testing.T) {
 
 func Test_ValidateImageCommandKeyless(t *testing.T) {
 	called := false
-	validateImageCmd := validateImageCmd(func(_ context.Context, _ app.SnapshotComponent, _ *app.SnapshotSpec, p policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
+	validateImageCmd := validateImageCmd(func(_ context.Context, _ app.SnapshotComponent, _ *app.SnapshotSpec, p policy.Policy, _ map[string]evaluator.Evaluator, _ bool) (*output.Output, error) {
 		assert.Equal(t, cosign.Identity{
 			Issuer:        "my-certificate-oidc-issuer",
 			Subject:       "my-certificate-identity",
@@ -890,7 +890,7 @@ unable to parse EnterpriseContractPolicySpec: error converting YAML to JSON: yam
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			validate := func(context.Context, app.SnapshotComponent, *app.SnapshotSpec, policy.Policy, []evaluator.Evaluator, bool) (*output.Output, error) {
+			validate := func(context.Context, app.SnapshotComponent, *app.SnapshotSpec, policy.Policy, map[string]evaluator.Evaluator, bool) (*output.Output, error) {
 				return nil, errors.New("expected")
 			}
 
@@ -920,7 +920,7 @@ unable to parse EnterpriseContractPolicySpec: error converting YAML to JSON: yam
 }
 
 func Test_FailureImageAccessibility(t *testing.T) {
-	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
+	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ map[string]evaluator.Evaluator, _ bool) (*output.Output, error) {
 		return &output.Output{
 			ImageSignatureCheck: output.VerificationStatus{
 				Passed: false,
@@ -991,7 +991,7 @@ func Test_FailureImageAccessibility(t *testing.T) {
 }
 
 func Test_FailureOutput(t *testing.T) {
-	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
+	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ map[string]evaluator.Evaluator, _ bool) (*output.Output, error) {
 		return &output.Output{
 			ImageSignatureCheck: output.VerificationStatus{
 				Passed: false,
@@ -1060,7 +1060,7 @@ func Test_FailureOutput(t *testing.T) {
 }
 
 func Test_WarningOutput(t *testing.T) {
-	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
+	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ map[string]evaluator.Evaluator, _ bool) (*output.Output, error) {
 		return &output.Output{
 			ImageSignatureCheck: output.VerificationStatus{
 				Passed: true,
@@ -1134,7 +1134,7 @@ func Test_WarningOutput(t *testing.T) {
 }
 
 func Test_FailureImageAccessibilityNonStrict(t *testing.T) {
-	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
+	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ map[string]evaluator.Evaluator, _ bool) (*output.Output, error) {
 		return &output.Output{
 			ImageSignatureCheck: output.VerificationStatus{
 				Passed: true,
