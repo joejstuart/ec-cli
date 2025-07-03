@@ -18,10 +18,13 @@ package vsa
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/sigstore/cosign/v2/pkg/oci"
@@ -41,6 +44,10 @@ type Predicate struct {
 	PolicySource     string                 `json:"policySource"`
 	Component        map[string]interface{} `json:"component"`
 	RuleResults      []evaluator.Result     `json:"ruleResults"`
+	// Snapshot-specific fields
+	SnapshotName   string `json:"snapshotName,omitempty"`
+	ComponentCount int    `json:"componentCount,omitempty"`
+	SnapshotDigest string `json:"snapshotDigest,omitempty"`
 }
 
 // Generator handles VSA predicate generation
@@ -93,6 +100,99 @@ func (g *Generator) GeneratePredicate(ctx context.Context, comp applicationsnaps
 	}, nil
 }
 
+// SnapshotGenerator handles VSA predicate generation for application snapshots
+type SnapshotGenerator struct {
+	Report            applicationsnapshot.Report
+	timestampProvider func() time.Time
+}
+
+// NewSnapshotGenerator creates a new VSA predicate generator for snapshots
+func NewSnapshotGenerator(report applicationsnapshot.Report) PredicateGenerator {
+	return &SnapshotGenerator{
+		Report:            report,
+		timestampProvider: time.Now,
+	}
+}
+
+// NewSnapshotGeneratorWithTime creates a generator with custom time provider (for testing)
+func NewSnapshotGeneratorWithTime(report applicationsnapshot.Report, timestampProvider func() time.Time) PredicateGenerator {
+	return &SnapshotGenerator{
+		Report:            report,
+		timestampProvider: timestampProvider,
+	}
+}
+
+// GeneratePredicate creates a Predicate for the entire application snapshot
+// The comp parameter is ignored for snapshot VSAs
+func (g *SnapshotGenerator) GeneratePredicate(ctx context.Context, comp applicationsnapshot.Component) (*Predicate, error) {
+	log.Infof("Generating snapshot VSA predicate for snapshot: %s", g.Report.Snapshot)
+
+	// Reuse existing predicate generation logic but adapt for snapshot
+	validationResult := "failed"
+	if g.Report.Success {
+		validationResult = "passed"
+	}
+
+	policySource := ""
+	if g.Report.Policy.Name != "" {
+		policySource = g.Report.Policy.Name
+	}
+
+	// Aggregate all rule results from all components
+	ruleResults := make([]evaluator.Result, 0)
+	for _, component := range g.Report.Components {
+		ruleResults = append(ruleResults, component.Violations...)
+		ruleResults = append(ruleResults, component.Warnings...)
+		ruleResults = append(ruleResults, component.Successes...)
+	}
+
+	// Create component info for snapshot
+	componentInfo := map[string]interface{}{
+		"snapshot":       g.Report.Snapshot,
+		"componentCount": len(g.Report.Components),
+		"components":     g.Report.Components,
+	}
+
+	return &Predicate{
+		ImageRef:         g.Report.Snapshot, // Use snapshot name as image ref for compatibility
+		ValidationResult: validationResult,
+		Timestamp:        g.timestampProvider().UTC().Format(time.RFC3339),
+		Verifier:         "ec-cli",
+		PolicySource:     policySource,
+		Component:        componentInfo,
+		RuleResults:      ruleResults,
+		// Snapshot-specific fields
+		SnapshotName:   g.Report.Snapshot,
+		ComponentCount: len(g.Report.Components),
+		SnapshotDigest: calculateSnapshotDigest(g.Report.Components),
+	}, nil
+}
+
+// calculateSnapshotDigest creates a unique digest for the entire snapshot
+func calculateSnapshotDigest(components []applicationsnapshot.Component) string {
+	if len(components) == 0 {
+		return ""
+	}
+
+	var digests []string
+	for _, comp := range components {
+		if comp.ContainerImage != "" {
+			digests = append(digests, comp.ContainerImage)
+		}
+	}
+
+	if len(digests) == 0 {
+		return ""
+	}
+
+	// Sort for consistency
+	sort.Strings(digests)
+
+	// Create hash of all digests
+	hash := sha256.Sum256([]byte(strings.Join(digests, "|")))
+	return fmt.Sprintf("sha256:%x", hash)
+}
+
 // Writer handles VSA file writing
 type Writer struct {
 	FS            afero.Fs    // defaults to the package-level FS or afero.NewOsFs()
@@ -137,6 +237,19 @@ func (w *Writer) WritePredicate(predicate *Predicate) (string, error) {
 	return fullPath, nil
 }
 
+// IsSnapshotVSA returns true if this predicate represents a snapshot VSA
+func (p *Predicate) IsSnapshotVSA() bool {
+	return p.SnapshotName != ""
+}
+
+// GetIdentifier returns the appropriate identifier for this predicate
+func (p *Predicate) GetIdentifier() string {
+	if p.IsSnapshotVSA() {
+		return p.SnapshotName
+	}
+	return p.ImageRef
+}
+
 // AttestationUploader is a function that uploads an attestation and returns a result string or error
 // This allows pluggable upload logic (OCI, Rekor, None, or custom)
 type AttestationUploader func(ctx context.Context, att oci.Signature, location string) (string, error)
@@ -157,4 +270,81 @@ func RekorUploader(ctx context.Context, att oci.Signature, location string) (str
 func NoopUploader(ctx context.Context, att oci.Signature, location string) (string, error) {
 	log.Infof("Upload type is 'none'; skipping upload for %s", location)
 	return "", nil
+}
+
+// SnapshotAttestor implements PredicateAttestor for application snapshots
+type SnapshotAttestor struct {
+	PredicatePath  string
+	PredicateType  string
+	SnapshotName   string
+	SnapshotDigest string
+	Signer         *Signer
+}
+
+// NewSnapshotAttestor creates a new attestor for snapshot VSAs
+func NewSnapshotAttestor(
+	predicatePath string,
+	snapshotName string,
+	snapshotDigest string,
+	signer *Signer,
+) PredicateAttestor {
+	return &SnapshotAttestor{
+		PredicatePath:  predicatePath,
+		PredicateType:  "https://conforma.dev/verification_summary/v1",
+		SnapshotName:   snapshotName,
+		SnapshotDigest: snapshotDigest,
+		Signer:         signer,
+	}
+}
+
+// AttestPredicate implements PredicateAttestor.AttestPredicate
+func (a *SnapshotAttestor) AttestPredicate(ctx context.Context) ([]byte, error) {
+	tempAttestor := &Attestor{
+		PredicatePath: a.PredicatePath,
+		PredicateType: a.PredicateType,
+		ImageDigest:   a.SnapshotDigest,
+		Repo:          a.SnapshotName,
+		Signer:        a.Signer,
+	}
+	return tempAttestor.AttestPredicate(ctx)
+}
+
+// WriteEnvelope implements PredicateAttestor.WriteEnvelope
+func (a *SnapshotAttestor) WriteEnvelope(data []byte) (string, error) {
+	tempAttestor := &Attestor{
+		PredicatePath: a.PredicatePath,
+		PredicateType: a.PredicateType,
+		ImageDigest:   a.SnapshotDigest,
+		Repo:          a.SnapshotName,
+		Signer:        a.Signer,
+	}
+	return tempAttestor.WriteEnvelope(data)
+}
+
+// GenerateAndWriteSnapshotVSA generates and writes a snapshot VSA predicate using the orchestrator.
+func GenerateAndWriteSnapshotVSA(
+	ctx context.Context,
+	report applicationsnapshot.Report,
+	writer PredicateWriter,
+) (string, error) {
+	generator := NewSnapshotGenerator(report)
+	// The component is ignored for snapshot generator, so we can pass an empty one.
+	return GenerateAndWriteVSA(ctx, generator, writer, applicationsnapshot.Component{})
+}
+
+// AttestSnapshotVSA signs and envelops a snapshot VSA using the orchestrator.
+func AttestSnapshotVSA(
+	ctx context.Context,
+	predicatePath string,
+	report applicationsnapshot.Report,
+	signer *Signer,
+) (string, error) {
+	attestor := NewSnapshotAttestor(
+		predicatePath,
+		report.Snapshot,
+		calculateSnapshotDigest(report.Components),
+		signer,
+	)
+	// The component is ignored for snapshot attestor, so we can pass an empty one.
+	return AttestVSA(ctx, attestor, applicationsnapshot.Component{})
 }

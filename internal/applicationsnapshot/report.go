@@ -29,6 +29,8 @@ import (
 	app "github.com/konflux-ci/application-api/api/v1alpha1"
 	"sigs.k8s.io/yaml"
 
+	"context"
+
 	"github.com/conforma/cli/internal/evaluator"
 	"github.com/conforma/cli/internal/format"
 	"github.com/conforma/cli/internal/policy"
@@ -60,6 +62,8 @@ type Report struct {
 	EffectiveTime time.Time                        `json:"effective-time"`
 	PolicyInput   [][]byte                         `json:"-"`
 	ShowSuccesses bool                             `json:"-"`
+	// VSA orchestrator for generating and attesting VSAs
+	vsaOrchestrator VSAOrchestrator
 }
 
 type summary struct {
@@ -218,12 +222,53 @@ func (r *Report) toFormat(format string) (data []byte, err error) {
 	return
 }
 
+// SetVSAOrchestrator sets the VSA orchestrator for this report
+func (r *Report) SetVSAOrchestrator(orchestrator VSAOrchestrator) {
+	r.vsaOrchestrator = orchestrator
+}
+
+// toVSA converts the report to VSA format
 func (r *Report) toVSA() ([]byte, error) {
+	// If we have a VSA orchestrator, use the new infrastructure
+	if r.vsaOrchestrator != nil {
+		// Create a temporary writer for the predicate
+		writer := &tempVSAWriter{}
+
+		// Generate and write the predicate
+		_, err := r.vsaOrchestrator.GenerateAndWriteVSA(context.Background(), *r, writer)
+		if err != nil {
+			return nil, err
+		}
+
+		// Read the predicate file and return its contents
+		return writer.getPredicateData(), nil
+	}
+
+	// Fall back to the old implementation
 	vsa, err := NewVSA(*r)
 	if err != nil {
 		return []byte{}, err
 	}
 	return json.Marshal(vsa)
+}
+
+// tempVSAWriter is a temporary writer that captures predicate data in memory
+type tempVSAWriter struct {
+	predicateData []byte
+}
+
+func (w *tempVSAWriter) WritePredicate(ctx context.Context, predicate VSAPredicate) (string, error) {
+	// Marshal the predicate to JSON
+	data, err := json.Marshal(predicate)
+	if err != nil {
+		return "", err
+	}
+	w.predicateData = data
+	return "temp-predicate.json", nil
+}
+
+func (w *tempVSAWriter) getPredicateData() []byte {
+	return w.predicateData
 }
 
 // toSummary returns a condensed version of the report.

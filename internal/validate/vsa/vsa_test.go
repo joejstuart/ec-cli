@@ -280,3 +280,168 @@ func TestGeneratePredicate(t *testing.T) {
 	assert.Equal(t, comp.Source, pred.Component["source"])
 	assert.Equal(t, comp.Successes, pred.RuleResults)
 }
+
+func TestPredicate_IsSnapshotVSA(t *testing.T) {
+	tests := []struct {
+		name      string
+		predicate *Predicate
+		expected  bool
+	}{
+		{
+			name: "per-image VSA",
+			predicate: &Predicate{
+				ImageRef: "test-image:tag",
+			},
+			expected: false,
+		},
+		{
+			name: "snapshot VSA",
+			predicate: &Predicate{
+				ImageRef:     "test-image:tag",
+				SnapshotName: "test-snapshot",
+			},
+			expected: true,
+		},
+		{
+			name: "empty snapshot name",
+			predicate: &Predicate{
+				ImageRef:     "test-image:tag",
+				SnapshotName: "",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.predicate.IsSnapshotVSA()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestPredicate_GetIdentifier(t *testing.T) {
+	tests := []struct {
+		name      string
+		predicate *Predicate
+		expected  string
+	}{
+		{
+			name: "per-image VSA",
+			predicate: &Predicate{
+				ImageRef: "test-image:tag",
+			},
+			expected: "test-image:tag",
+		},
+		{
+			name: "snapshot VSA",
+			predicate: &Predicate{
+				ImageRef:     "test-image:tag",
+				SnapshotName: "test-snapshot",
+			},
+			expected: "test-snapshot",
+		},
+		{
+			name: "empty snapshot name",
+			predicate: &Predicate{
+				ImageRef:     "test-image:tag",
+				SnapshotName: "",
+			},
+			expected: "test-image:tag",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.predicate.GetIdentifier()
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSnapshotAttestor_AttestPredicate_And_WriteEnvelope(t *testing.T) {
+	// Set up test filesystem and key
+	fs := afero.NewMemMapFs()
+	predicatePath := "/snapshot-vsa.json"
+	keyPath := "/test.key"
+	testKey := `-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----
+eyJrZGYiOnsibmFtZSI6InNjcnlwdCIsInBhcmFtcyI6eyJOIjo2NTUzNiwiciI6
+OCwicCI6MX0sInNhbHQiOiJLYU9OQzduQVJLOVgxM1FoaWFucjAwTTBGYys2Sitr
+dnAxN1FuanpiVk9nPSJ9LCJjaXBoZXIiOnsibmFtZSI6Im5hY2wvc2VjcmV0Ym94
+Iiwibm9uY2UiOiJVOHZqWWtqMlZOUFZGdlZFZWZ3bXZ5VGloUERrelBoaCJ9LCJj
+aXBoZXJ0ZXh0IjoidWNWMnQ4TTZVNFJvb29FOXc0d3dkc3E1RDYrS2RKY245dERT
+KzFwRDRGN040SVJOWEgzSTBua3h1a3NackFOUHR1emIvTkVYQ201dUp3Zjh3Qzl1
+VlprbXdwNU5jRUZ6b3ZNS3JCZmNvdXdjaEkrMzkrQ0NhbVZPbzBucmRnZjhvcmpK
+dXdrWDBYL1phY0RUTERGaUxyc1laMWVMMmlqMGU1MVRpZmVQNTl4WXNPK1FnM1Jv
+OURRVjNQMk9ndDFDaVFHeGg1VXhUZytGc3c9PSJ9
+-----END ENCRYPTED SIGSTORE PRIVATE KEY-----`
+	_ = afero.WriteFile(fs, predicatePath, []byte(`{"hello":"world"}`), 0o600)
+	_ = afero.WriteFile(fs, keyPath, []byte(testKey), 0o600)
+
+	signer := testSigner(keyPath, fs)
+	attestor := NewSnapshotAttestor(predicatePath, "test-snapshot", "sha256:abc123", signer)
+
+	// AttestPredicate should succeed
+	env, err := attestor.AttestPredicate(context.Background())
+	assert.NoError(t, err)
+	assert.NotEmpty(t, env)
+
+	// WriteEnvelope should succeed
+	envelopePath, err := attestor.WriteEnvelope(env)
+	assert.NoError(t, err)
+	assert.Contains(t, envelopePath, ".intoto.jsonl")
+}
+
+func TestSnapshotVSAOrchestration_FullFlow(t *testing.T) {
+	// Prepare a minimal report
+	report := applicationsnapshot.Report{
+		Snapshot: "snapshot-orch",
+		Policy:   ecapi.EnterpriseContractPolicySpec{Name: "policy-orch"},
+		Success:  true,
+		Components: []applicationsnapshot.Component{
+			{
+				SnapshotComponent: appapi.SnapshotComponent{
+					Name:           "comp1",
+					ContainerImage: "quay.io/test/comp1:tag",
+				},
+				Success: true,
+				Successes: []evaluator.Result{
+					{Message: "ok"},
+				},
+			},
+		},
+	}
+
+	// Use in-memory FS for the writer
+	writer := &Writer{
+		FS:            afero.NewMemMapFs(),
+		TempDirPrefix: "vsa-",
+		FilePerm:      0o600,
+	}
+
+	// Generate and write the snapshot VSA predicate
+	predicatePath, err := GenerateAndWriteSnapshotVSA(context.Background(), report, writer)
+	require.NoError(t, err)
+	assert.Contains(t, predicatePath, "vsa-")
+
+	// Prepare a test signer
+	keyPath := "/test.key"
+	testKey := `-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----
+eyJrZGYiOnsibmFtZSI6InNjcnlwdCIsInBhcmFtcyI6eyJOIjo2NTUzNiwiciI6
+OCwicCI6MX0sInNhbHQiOiJLYU9OQzduQVJLOVgxM1FoaWFucjAwTTBGYys2Sitr
+dnAxN1FuanpiVk9nPSJ9LCJjaXBoZXIiOnsibmFtZSI6Im5hY2wvc2VjcmV0Ym94
+Iiwibm9uY2UiOiJVOHZqWWtqMlZOUFZGdlZFZWZ3bXZ5VGloUERrelBoaCJ9LCJj
+aXBoZXJ0ZXh0IjoidWNWMnQ4TTZVNFJvb29FOXc0d3dkc3E1RDYrS2RKY245dERT
+KzFwRDRGN040SVJOWEgzSTBua3h1a3NackFOUHR1emIvTkVYQ201dUp3Zjh3Qzl1
+VlprbXdwNU5jRUZ6b3ZNS3JCZmNvdXdjaEkrMzkrQ0NhbVZPbzBucmRnZjhvcmpK
+dXdrWDBYL1phY0RUTERGaUxyc1laMWVMMmlqMGU1MVRpZmVQNTl4WXNPK1FnM1Jv
+OURRVjNQMk9ndDFDaVFHeGg1VXhUZytGc3c9PSJ9
+-----END ENCRYPTED SIGSTORE PRIVATE KEY-----`
+	_ = afero.WriteFile(writer.FS, keyPath, []byte(testKey), 0o600)
+	signer := testSigner(keyPath, writer.FS)
+
+	// Attest and envelope the snapshot VSA
+	envelopePath, err := AttestSnapshotVSA(context.Background(), predicatePath, report, signer)
+	require.NoError(t, err)
+	assert.Contains(t, envelopePath, ".intoto.jsonl")
+}
