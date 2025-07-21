@@ -53,7 +53,7 @@ func TestDefaultFilterFactory(t *testing.T) {
 		{
 			name:        "no config",
 			source:      ecc.Source{},
-			wantFilters: 0,
+			wantFilters: 1, // Always adds PipelineIntentionFilter
 		},
 		{
 			name:        "pipeline intention only",
@@ -63,7 +63,7 @@ func TestDefaultFilterFactory(t *testing.T) {
 		{
 			name:        "include list only",
 			source:      makeSource("", []string{"@redhat", "cve"}),
-			wantFilters: 1,
+			wantFilters: 2, // PipelineIntentionFilter + IncludeListFilter
 		},
 		{
 			name:        "both pipeline_intention and include list",
@@ -71,9 +71,9 @@ func TestDefaultFilterFactory(t *testing.T) {
 			wantFilters: 2,
 		},
 		{
-			name:        "no includes and no pipeline_intention - should include all packages",
+			name:        "no includes and no pipeline_intention - PipelineIntentionFilter still added",
 			source:      makeSource("", nil),
-			wantFilters: 0, // No filters means all packages are included
+			wantFilters: 1, // PipelineIntentionFilter is always added
 		},
 	}
 
@@ -151,19 +151,19 @@ func TestPipelineIntentionFilter(t *testing.T) {
 		wantPkgs   []string
 	}{
 		{
-			name:       "no intentions ⇒ no filtering",
+			name:       "no intentions ⇒ only packages with no pipeline_intention metadata",
 			intentions: nil,
-			wantPkgs:   []string{"a", "b", "c"},
+			wantPkgs:   []string{"c"}, // Only c has no pipeline_intention metadata
 		},
 		{
-			name:       "pipeline_intention set - include packages with any pipeline_intention metadata",
+			name:       "pipeline_intention set - include packages with matching pipeline_intention metadata",
 			intentions: []string{"release"},
-			wantPkgs:   []string{"a", "b"}, // Both a and b have pipeline_intention metadata
+			wantPkgs:   []string{"a"}, // Only a has matching pipeline_intention metadata
 		},
 		{
-			name:       "pipeline_intention set with multiple values - still include packages with any pipeline_intention metadata",
+			name:       "pipeline_intention set with multiple values - include packages with any matching pipeline_intention metadata",
 			intentions: []string{"dev", "release"},
-			wantPkgs:   []string{"a", "b"}, // Both a and b have pipeline_intention metadata
+			wantPkgs:   []string{"a", "b"}, // Both a and b have matching pipeline_intention metadata
 		},
 	}
 
@@ -192,19 +192,19 @@ func TestCompleteFilteringBehavior(t *testing.T) {
 		expectedPkg []string
 	}{
 		{
-			name:        "no includes and no pipeline_intention - all packages included",
+			name:        "no includes and no pipeline_intention - only packages with no pipeline_intention metadata",
 			source:      makeSource("", nil),
-			expectedPkg: []string{"release", "dev", "general"},
+			expectedPkg: []string{"general"}, // Only general has no pipeline_intention metadata
 		},
 		{
-			name:        "pipeline_intention set - only packages with pipeline_intention metadata",
+			name:        "pipeline_intention set - only packages with matching pipeline_intention metadata",
 			source:      makeSource(`{"pipeline_intention":"release"}`, nil),
-			expectedPkg: []string{"release", "dev"}, // general has no pipeline_intention metadata
+			expectedPkg: []string{"release"}, // Only release has matching pipeline_intention metadata
 		},
 		{
-			name:        "includes set - only matching packages",
+			name:        "includes set - only matching packages with no pipeline_intention metadata",
 			source:      makeSource("", []string{"release", "general"}),
-			expectedPkg: []string{"release", "general"},
+			expectedPkg: []string{"general"}, // Only general has no pipeline_intention metadata and matches includes
 		},
 		{
 			name:        "both pipeline_intention and includes - AND logic",
@@ -219,6 +219,56 @@ func TestCompleteFilteringBehavior(t *testing.T) {
 			filters := filterFactory.CreateFilters(tc.source)
 			got := filterNamespaces(rules, filters...)
 			assert.ElementsMatch(t, tc.expectedPkg, got, tc.name)
+		})
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Test filtering with rules that don't have metadata
+//////////////////////////////////////////////////////////////////////////////
+
+func TestFilteringWithRulesWithoutMetadata(t *testing.T) {
+	// This test demonstrates how filtering works with rules that don't have
+	// pipeline_intention metadata, like the example fail_with_data.rego rule.
+	rules := policyRules{
+		"main.fail_with_data": {}, // Rule without any metadata (like fail_with_data.rego)
+		"release.security":    {PipelineIntention: []string{"release"}},
+		"dev.validation":      {PipelineIntention: []string{"dev"}},
+		"general.basic":       {}, // Another rule without metadata
+	}
+
+	tests := []struct {
+		name        string
+		source      ecc.Source
+		expectedPkg []string
+		description string
+	}{
+		{
+			name:        "no pipeline_intention - only rules without metadata",
+			source:      makeSource("", nil),
+			expectedPkg: []string{"main", "general"}, // Only packages with rules that have no pipeline_intention metadata
+			description: "When no pipeline_intention is configured, only rules without pipeline_intention metadata are evaluated",
+		},
+		{
+			name:        "pipeline_intention set - only rules with matching metadata",
+			source:      makeSource(`{"pipeline_intention":"release"}`, nil),
+			expectedPkg: []string{"release"}, // Only package with matching pipeline_intention metadata
+			description: "When pipeline_intention is set, only rules with matching pipeline_intention metadata are evaluated",
+		},
+		{
+			name:        "includes with no pipeline_intention - only matching rules without metadata",
+			source:      makeSource("", []string{"main", "release"}),
+			expectedPkg: []string{"main"}, // Only main has no pipeline_intention metadata and matches includes
+			description: "When includes are set but no pipeline_intention, only rules without metadata that match includes are evaluated",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filterFactory := NewDefaultFilterFactory()
+			filters := filterFactory.CreateFilters(tc.source)
+			got := filterNamespaces(rules, filters...)
+			assert.ElementsMatch(t, tc.expectedPkg, got, tc.description)
 		})
 	}
 }
