@@ -345,6 +345,9 @@ func (c conftestEvaluator) CapabilitiesPath() string {
 
 type policyRules map[string]rule.Info
 
+// Add a new type to track non-annotated rules separately
+type nonAnnotatedRules map[string]bool
+
 func (r *policyRules) collect(a *ast.AnnotationsRef) error {
 	if a.Annotations == nil {
 		return nil
@@ -381,6 +384,8 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 	// exist with the same code in two separate sources the collected rule
 	// information is not deterministic
 	rules := policyRules{}
+	// Track non-annotated rules separately for filtering purposes only
+	nonAnnotatedRules := nonAnnotatedRules{}
 	// Download all sources
 	for _, s := range c.policySources {
 		dir, err := s.GetPolicy(ctx, c.workDir, false)
@@ -418,12 +423,37 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 			}
 		}
 
+		// Collect ALL rules for filtering purposes - both with and without annotations
+		// This ensures that rules without metadata (like fail_with_data.rego) are properly included
 		for _, a := range annotations {
-			if a.Annotations == nil {
-				continue
-			}
-			if err := rules.collect(a); err != nil {
-				return nil, err
+			if a.Annotations != nil {
+				// Rules with annotations - collect full metadata
+				if err := rules.collect(a); err != nil {
+					return nil, err
+				}
+			} else {
+				// Rules without annotations - track for filtering only, not for success computation
+				ruleRef := a.GetRule()
+				if ruleRef != nil {
+					// Extract package name from the rule path
+					packageName := ""
+					if len(a.Path) > 1 {
+						// Path format is typically ["data", "package", "rule"]
+						// We want the package part (index 1)
+						if len(a.Path) >= 2 {
+							packageName = strings.ReplaceAll(a.Path[1].String(), `"`, "")
+						}
+					}
+
+					// Extract short name from the rule head
+					shortName := ruleRef.Head.Name.String()
+
+					// Generate code for filtering purposes
+					code := fmt.Sprintf("%s.%s", packageName, shortName)
+
+					// Track for filtering but don't add to rules map for success computation
+					nonAnnotatedRules[code] = true
+				}
 			}
 		}
 	}
@@ -431,7 +461,25 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 	// Filter namespaces using the new pluggable filtering system
 	filterFactory := NewDefaultFilterFactory()
 	filters := filterFactory.CreateFilters(c.source)
-	filteredNamespaces := filterNamespaces(rules, filters...)
+	// Combine annotated and non-annotated rules for filtering
+	allRules := make(policyRules)
+	for code, rule := range rules {
+		allRules[code] = rule
+	}
+	// Add non-annotated rules as minimal rule.Info for filtering
+	for code := range nonAnnotatedRules {
+		parts := strings.Split(code, ".")
+		if len(parts) >= 2 {
+			packageName := parts[len(parts)-2]
+			shortName := parts[len(parts)-1]
+			allRules[code] = rule.Info{
+				Code:      code,
+				Package:   packageName,
+				ShortName: shortName,
+			}
+		}
+	}
+	filteredNamespaces := filterNamespaces(allRules, filters...)
 
 	var r testRunner
 	var ok bool
@@ -519,6 +567,7 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 
 		for i := range result.Failures {
 			failure := result.Failures[i]
+			// log the failure
 			addRuleMetadata(ctx, &failure, rules)
 
 			if !c.isResultIncluded(failure, target.Target, missingIncludes) {

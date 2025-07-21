@@ -250,9 +250,6 @@ func (nf *NamespaceFilter) Filter(rules policyRules) []string {
 	// Group rules by package for efficient filtering
 	grouped := make(map[string][]rule.Info)
 	for fqName, r := range rules {
-		// log all rule names for debugging purposes
-		log.Infof("RULE = %v", fqName)
-		log.Infof("RULE DATA = %v", r)
 		pkg := strings.SplitN(fqName, ".", 2)[0]
 		if pkg == "" {
 			pkg = fqName // fallback
