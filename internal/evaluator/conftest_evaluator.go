@@ -207,6 +207,7 @@ type conftestEvaluator struct {
 	fs            afero.Fs
 	namespace     []string
 	source        ecc.Source
+	filterType    string
 }
 
 type conftestRunner struct {
@@ -287,11 +288,15 @@ func (r conftestRunner) Run(ctx context.Context, fileList []string) (result []Ou
 // NewConftestEvaluator returns initialized conftestEvaluator implementing
 // Evaluator interface
 func NewConftestEvaluator(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source) (Evaluator, error) {
-	return NewConftestEvaluatorWithNamespace(ctx, policySources, p, source, []string{})
+	return NewConftestEvaluatorWithFilter(ctx, policySources, p, source, []string{}, "include")
 }
 
-// set the policy namespace
 func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, namespace []string) (Evaluator, error) {
+	return NewConftestEvaluatorWithFilter(ctx, policySources, p, source, namespace, "include")
+}
+
+// NewConftestEvaluatorWithFilter returns initialized conftestEvaluator with custom filter type
+func NewConftestEvaluatorWithFilter(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, namespace []string, filterType string) (Evaluator, error) {
 	if trace.IsEnabled() {
 		r := trace.StartRegion(ctx, "ec:conftest-create-evaluator")
 		defer r.End()
@@ -305,6 +310,7 @@ func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []sour
 		fs:            fs,
 		namespace:     namespace,
 		source:        source,
+		filterType:    filterType, // default value
 	}
 
 	c.include, c.exclude = computeIncludeExclude(source, p)
@@ -459,7 +465,12 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 	}
 
 	// Filter namespaces using the new pluggable filtering system
-	filterFactory := NewIncludeFilterFactory()
+	var filterFactory FilterFactory
+	if c.filterType == "pipeline-intention" {
+		filterFactory = NewDefaultFilterFactory()
+	} else {
+		filterFactory = NewIncludeFilterFactory()
+	}
 	filters := filterFactory.CreateFilters(c.source)
 	// Combine annotated and non-annotated rules for filtering
 	allRules := make(policyRules)

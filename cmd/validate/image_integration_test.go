@@ -71,7 +71,7 @@ func TestEvaluatorLifecycle(t *testing.T) {
 		evaluators[i].On("Destroy").NotBefore(expectations...)
 	}
 
-	newConftestEvaluator = func(_ context.Context, s []source.PolicySource, _ evaluator.ConfigProvider, _ v1alpha1.Source) (evaluator.Evaluator, error) {
+	newConftestEvaluator = func(_ context.Context, s []source.PolicySource, _ evaluator.ConfigProvider, _ v1alpha1.Source, _ []string, _ string) (evaluator.Evaluator, error) {
 		// We are splitting this url to get to the index of the evaluator.
 		idx, err := strconv.Atoi(strings.Split(strings.Split(s[0].PolicyUrl(), "@")[0], "::")[1])
 		require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestEvaluatorLifecycle(t *testing.T) {
 		return evaluators[idx], nil
 	}
 	t.Cleanup(func() {
-		newConftestEvaluator = evaluator.NewConftestEvaluator
+		newConftestEvaluator = evaluator.NewConftestEvaluatorWithFilter
 	})
 
 	validate := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, evaluators []evaluator.Evaluator, _ bool) (*output.Output, error) {

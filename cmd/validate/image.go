@@ -47,7 +47,7 @@ import (
 
 type imageValidationFunc func(context.Context, app.SnapshotComponent, *app.SnapshotSpec, policy.Policy, []evaluator.Evaluator, bool) (*output.Output, error)
 
-var newConftestEvaluator = evaluator.NewConftestEvaluator
+var newConftestEvaluator = evaluator.NewConftestEvaluatorWithFilter
 var newOPAEvaluator = evaluator.NewOPAEvaluator
 
 func validateImageCmd(validate imageValidationFunc) *cobra.Command {
@@ -79,9 +79,11 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 		vsaEnabled                  bool
 		vsaSigningKey               string
 		vsaUpload                   string
+		filterType                  string
 	}{
-		strict:  true,
-		workers: 5,
+		strict:     true,
+		workers:    5,
+		filterType: "include",
 	}
 
 	validOutputFormats := applicationsnapshot.OutputFormats
@@ -333,7 +335,7 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 				if utils.IsOpaEnabled() {
 					c, err = newOPAEvaluator()
 				} else {
-					c, err = newConftestEvaluator(cmd.Context(), policySources, data.policy, sourceGroup)
+					c, err = newConftestEvaluator(cmd.Context(), policySources, data.policy, sourceGroup, []string{}, data.filterType)
 				}
 
 				if err != nil {
@@ -594,6 +596,7 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 	cmd.Flags().BoolVar(&data.vsaEnabled, "vsa", false, "Generate a Verification Summary Attestation (VSA) for each validated image.")
 	cmd.Flags().StringVar(&data.vsaSigningKey, "vsa-signing-key", "", "Path to the private key for signing the VSA.")
 	cmd.Flags().StringVar(&data.vsaUpload, "vsa-upload", "oci", "Where to upload the VSA attestation: oci, rekor, none")
+	cmd.Flags().StringVar(&data.filterType, "enable-filter", "include", "Filter type to use: include (default) or pipeline-intention")
 
 	if len(data.input) > 0 || len(data.filePath) > 0 || len(data.images) > 0 {
 		if err := cmd.MarkFlagRequired("image"); err != nil {
