@@ -364,8 +364,8 @@ func TestGeneratePredicateWithPipelineIntention(t *testing.T) {
 			}
 
 			// Create generator and generate predicate
-			generator := NewGenerator(report)
-			pred, err := generator.GeneratePredicate(context.Background(), comp)
+			generator := NewGenerator(report, comp)
+			pred, err := generator.GeneratePredicate(context.Background())
 			require.NoError(t, err)
 
 			// Verify basic predicate fields
