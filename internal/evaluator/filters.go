@@ -96,6 +96,39 @@ func (f *DefaultFilterFactory) CreateFilters(source ecc.Source) []RuleFilter {
 	return filters
 }
 
+type IncludeFilterFactory struct{}
+
+func NewIncludeFilterFactory() FilterFactory { return &IncludeFilterFactory{} }
+
+// CreateFilters builds a list of filters based on the source configuration.
+//
+// The filtering logic follows these rules:
+// 1. Pipeline Intention Filtering:
+//   - When pipeline_intention is set in ruleData: only include packages with rules
+//     that have matching pipeline_intention metadata
+//   - When pipeline_intention is NOT set in ruleData: only include packages with rules
+//     that have NO pipeline_intention metadata (general-purpose rules)
+//
+// 2. Include List Filtering:
+//   - When includes are specified: only include packages that match the include criteria
+//   - Supports @collection, package names, and package.rule patterns
+//
+// 3. Combined Logic:
+//   - All filters are applied with AND logic - a package must pass ALL filters
+//   - This allows fine-grained control over which rules are evaluated
+func (f *IncludeFilterFactory) CreateFilters(source ecc.Source) []RuleFilter {
+	var filters []RuleFilter
+
+	hasIncludes := source.Config != nil && len(source.Config.Include) > 0
+
+	// ── 1. Include list (handles @collection / pkg / pkg.rule) ─────────────
+	if hasIncludes {
+		filters = append(filters, NewIncludeListFilter(source.Config.Include))
+	}
+
+	return filters
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // PipelineIntentionFilter
 //////////////////////////////////////////////////////////////////////////////

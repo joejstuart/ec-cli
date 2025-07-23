@@ -459,7 +459,7 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 	}
 
 	// Filter namespaces using the new pluggable filtering system
-	filterFactory := NewDefaultFilterFactory()
+	filterFactory := NewIncludeFilterFactory()
 	filters := filterFactory.CreateFilters(c.source)
 	// Combine annotated and non-annotated rules for filtering
 	allRules := make(policyRules)
