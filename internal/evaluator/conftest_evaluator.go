@@ -287,7 +287,7 @@ func (r conftestRunner) Run(ctx context.Context, fileList []string) (result []Ou
 // NewConftestEvaluator returns initialized conftestEvaluator implementing
 // Evaluator interface
 func NewConftestEvaluator(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source) (Evaluator, error) {
-	return NewConftestEvaluatorWithNamespace(ctx, policySources, p, source, nil)
+	return NewConftestEvaluatorWithNamespace(ctx, policySources, p, source, []string{})
 }
 
 // set the policy namespace
@@ -486,22 +486,21 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 	if r, ok = ctx.Value(runnerKey).(testRunner); r == nil || !ok {
 
 		// Determine which namespaces to use
-		namespaceToUse := c.namespace
+		namespacesToUse := c.namespace
 
 		// If we have filtered namespaces from the filtering system, use those
 		if len(filteredNamespaces) > 0 {
-			namespaceToUse = filteredNamespaces
-		} else if len(c.namespace) == 0 {
-			// When no namespaces are specified and filtering results in empty list,
-			// use an empty namespace list to prevent any evaluation
-			namespaceToUse = []string{}
+			namespacesToUse = filteredNamespaces
 		}
+
+		// log the namespaces to use
+		log.Debugf("Namespaces to use: %v", namespacesToUse)
 
 		r = &conftestRunner{
 			runner.TestRunner{
 				Data:          []string{c.dataDir},
 				Policy:        []string{c.policyDir},
-				Namespace:     namespaceToUse,
+				Namespace:     namespacesToUse,
 				AllNamespaces: false, // Always false to prevent bypassing filtering
 				NoFail:        true,
 				Output:        c.outputFormat,
