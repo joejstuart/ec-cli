@@ -207,6 +207,7 @@ type conftestEvaluator struct {
 	fs            afero.Fs
 	namespace     []string
 	source        ecc.Source
+	ruleSelector  RuleSelector // NEW: Unified rule selector
 }
 
 type conftestRunner struct {
@@ -308,6 +309,12 @@ func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []sour
 	}
 
 	c.include, c.exclude = computeIncludeExclude(source, p)
+
+	// Initialize the unified rule selector
+	imageContext := &ImageContext{
+		Time: p.EffectiveTime(),
+	}
+	c.ruleSelector = NewUnifiedRuleSelector(source, p, imageContext)
 
 	dir, err := utils.CreateWorkDir(fs)
 	if err != nil {
@@ -458,8 +465,8 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 		}
 	}
 
-	// Filter namespaces using the new pluggable filtering system
-	filterFactory := NewIncludeFilterFactory()
+	// Filter namespaces using the new unified filtering system
+	filterFactory := NewUnifiedFilterFactory(c.ruleSelector)
 	filters := filterFactory.CreateFilters(c.source)
 	// Combine annotated and non-annotated rules for filtering
 	allRules := make(policyRules)
@@ -479,6 +486,9 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 			}
 		}
 	}
+
+	// Set all rules in the selector for analysis
+	c.ruleSelector.SetAllRules(allRules)
 	filteredNamespaces := filterNamespaces(allRules, filters...)
 
 	var r testRunner
@@ -938,132 +948,25 @@ func isResultEffective(failure Result, now time.Time) bool {
 // discarded based on the policy configuration.
 // 'missingIncludes' is a list of include directives that gets pruned if the result is matched
 func (c conftestEvaluator) isResultIncluded(result Result, target string, missingIncludes map[string]bool) bool {
-	ruleMatchers := makeMatchers(result)
-	includeScore := scoreMatches(ruleMatchers, c.include.get(target), missingIncludes)
-	excludeScore := scoreMatches(ruleMatchers, c.exclude.get(target), map[string]bool{})
-	return includeScore > excludeScore
+	// Use the unified rule selector instead of the current scoring logic
+	ruleID := ExtractStringFromMetadata(result, metadataCode)
+	imageDigest := c.extractImageDigest(target)
+	effectiveTime := c.policy.EffectiveTime()
+
+	return c.ruleSelector.ShouldReport(ruleID, imageDigest, effectiveTime)
 }
 
-// scoreMatches returns the combined score for every match between needles and haystack.
-// 'toBePruned' contains items that will be removed (pruned) from this map if a match is found.
-func scoreMatches(needles, haystack []string, toBePruned map[string]bool) int {
-	var s int
-	for _, needle := range needles {
-		for _, hay := range haystack {
-			if hay == needle {
-				s += score(hay)
-				delete(toBePruned, hay)
-			}
+// extractImageDigest extracts the image digest from the target string
+func (c conftestEvaluator) extractImageDigest(target string) string {
+	// Parse the target to extract digest if present
+	// This is a simplified implementation - in practice, you'd want to parse the image reference
+	if strings.Contains(target, "@") {
+		parts := strings.Split(target, "@")
+		if len(parts) > 1 {
+			return parts[1]
 		}
 	}
-	return s
-}
-
-// score computes and returns the specificity of the given name. The scoring guidelines are:
-//  1. If the name starts with "@" the returned score is exactly 10, e.g. "@collection". No
-//     further processing is done.
-//  2. Add 1 if the name covers everything, i.e. "*"
-//  3. Add 10 if the name specifies a package name, e.g. "pkg", "pkg.", "pkg.*", or "pkg.rule",
-//     and an additional 10 based on the namespace depth of the pkg, e.g. "a.pkg.rule" adds 10
-//     more, "a.b.pkg.rule" adds 20, etc
-//  4. Add 100 if a term is used, e.g. "*:term", "pkg:term" or "pkg.rule:term"
-//  5. Add 100 if a rule is used, e.g. "pkg.rule", "pkg.rule:term"
-//
-// The score is cumulative. If a name is covered by multiple items in the guidelines, they
-// are added together. For example, "pkg.rule:term" scores at 210.
-func score(name string) int {
-	if strings.HasPrefix(name, "@") {
-		return 10
-	}
-	var value int
-	shortName, term, _ := strings.Cut(name, ":")
-	if term != "" {
-		value += 100
-	}
-	nameSplit := strings.Split(shortName, ".")
-	nameSplitLen := len(nameSplit)
-
-	if nameSplitLen == 1 {
-		// When there are no dots we assume the name refers to a
-		// package and any rule inside the package is matched
-		if shortName == "*" {
-			value += 1
-		} else {
-			value += 10
-		}
-	} else if nameSplitLen > 1 {
-		// When there is at least one dot we assume the last element
-		// is the rule and everything else is the package path
-		rule := nameSplit[nameSplitLen-1]
-		pkg := strings.Join(nameSplit[:nameSplitLen-1], ".")
-
-		if pkg == "*" {
-			// E.g. "*.rule", a weird edge case
-			value += 1
-		} else {
-			// E.g. "pkg.rule" or "path.pkg.rule"
-			value += 10 * (nameSplitLen - 1)
-		}
-
-		if rule != "*" && rule != "" {
-			// E.g. "pkg.rule" so a specific rule was specified
-			value += 100
-		}
-
-	}
-	return value
-}
-
-// makeMatchers returns the possible matching strings for the result.
-func makeMatchers(result Result) []string {
-	code := ExtractStringFromMetadata(result, metadataCode)
-	terms := extractStringsFromMetadata(result, metadataTerm)
-	parts := strings.Split(code, ".")
-	var pkg string
-	if len(parts) >= 2 {
-		pkg = parts[len(parts)-2]
-	}
-	rule := parts[len(parts)-1]
-
-	var matchers []string
-
-	if pkg != "" {
-		matchers = append(matchers, pkg, fmt.Sprintf("%s.*", pkg), fmt.Sprintf("%s.%s", pkg, rule))
-	}
-
-	// A term can be applied to any of the package matchers above. But we don't want to apply a term
-	// matcher to a matcher that already includes a term.
-	var termMatchers []string
-	for _, term := range terms {
-		if len(term) == 0 {
-			continue
-		}
-		for _, matcher := range matchers {
-			termMatchers = append(termMatchers, fmt.Sprintf("%s:%s", matcher, term))
-		}
-	}
-	matchers = append(matchers, termMatchers...)
-
-	matchers = append(matchers, "*")
-
-	matchers = append(matchers, extractCollections(result)...)
-
-	return matchers
-}
-
-// extractCollections returns the collections encoded in the result metadata.
-func extractCollections(result Result) []string {
-	var collections []string
-	if maybeCollections, exists := result.Metadata[metadataCollections]; exists {
-		if ruleCollections, ok := maybeCollections.([]string); ok {
-			for _, c := range ruleCollections {
-				collections = append(collections, "@"+c)
-			}
-		} else {
-			panic(fmt.Sprintf("Unsupported collections set in Metadata, expecting []string got: %v", maybeCollections))
-		}
-	}
-	return collections
+	return target
 }
 
 // ExtractStringFromMetadata returns the string value from the result metadata at the given key.
