@@ -49,6 +49,113 @@ type FilterFactory interface {
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// Pipeline Intention Filter Factory
+//////////////////////////////////////////////////////////////////////////////
+
+// PipelineIntentionFilterFactory creates filters specifically for pipeline intention filtering.
+//
+// This factory creates a filter that:
+// 1. Only evaluates packages that contain rules with pipeline_intention metadata
+// 2. Only includes rules that have pipeline_intention matching the configured values
+// 3. Excludes rules without pipeline_intention metadata when pipeline_intention is configured
+type PipelineIntentionFilterFactory struct{}
+
+func NewPipelineIntentionFilterFactory() FilterFactory {
+	return &PipelineIntentionFilterFactory{}
+}
+
+// CreateFilters creates a pipeline intention filter based on the source configuration.
+//
+// Behavior:
+//   - When pipeline_intention is set in ruleData: only include packages with rules
+//     that have matching pipeline_intention metadata
+//   - When pipeline_intention is NOT set in ruleData: only include packages with rules
+//     that have NO pipeline_intention metadata (general-purpose rules)
+func (f *PipelineIntentionFilterFactory) CreateFilters(source ecc.Source) []RuleFilter {
+	// Extract single pipeline_intention string from policy config
+	targetIntention := extractStringFromRuleData(source, "pipeline_intention")
+	var targetIntentions []string
+	if targetIntention != "" {
+		targetIntentions = []string{targetIntention}
+	}
+	return []RuleFilter{NewPipelineIntentionFilter(targetIntentions)}
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Pipeline Intention Filter
+//////////////////////////////////////////////////////////////////////////////
+
+// PipelineIntentionFilter filters packages based on pipeline_intention metadata.
+//
+// This filter ensures that only rules appropriate for the current pipeline context
+// are evaluated. It works by examining the pipeline_intention metadata in each rule
+// and comparing it against the configured pipeline_intention value.
+//
+// The relationship:
+// - Policy Config: pipeline_intention is a SINGLE string (e.g., "release")
+// - Rule Metadata: pipeline_intention is a LIST of strings (e.g., ["release", "production"])
+//
+// Behavior:
+// - When targetIntention is empty (no pipeline_intention configured):
+//   - Only includes packages with rules that have NO pipeline_intention metadata
+//   - This allows general-purpose rules to run in default contexts
+//
+// - When targetIntention is set (pipeline_intention configured):
+//   - Only includes packages with rules that have the target value in their pipeline_intention list
+//   - This ensures only pipeline-specific rules are evaluated
+//
+// Examples:
+// - Config: pipeline_intention: "release"
+//   - Rule with pipeline_intention: ["release", "production"] → INCLUDED (contains "release")
+//   - Rule with pipeline_intention: ["staging"] → EXCLUDED (doesn't contain "release")
+//   - Rule with no pipeline_intention metadata → EXCLUDED
+//
+// - Config: no pipeline_intention set
+//   - Rule with pipeline_intention: ["release"] → EXCLUDED
+//   - Rule with no pipeline_intention metadata → INCLUDED
+type PipelineIntentionFilter struct {
+	targetIntentions []string
+}
+
+func NewPipelineIntentionFilter(target []string) RuleFilter {
+	return &PipelineIntentionFilter{targetIntentions: target}
+}
+
+// Include determines whether a package should be included based on pipeline_intention metadata.
+//
+// The function examines all rules in the package to determine if any have appropriate
+// pipeline_intention metadata for the current configuration.
+func (f *PipelineIntentionFilter) Include(_ string, rules []rule.Info) bool {
+	if len(f.targetIntentions) == 0 {
+		// When no pipeline_intention is configured, only include packages with no pipeline_intention metadata
+		// This allows general-purpose rules (like the example fail_with_data.rego) to be evaluated
+		for _, r := range rules {
+			if len(r.PipelineIntention) > 0 {
+				log.Debugf("PipelineIntentionFilter: Excluding package with pipeline_intention metadata")
+				return false // Exclude packages with pipeline_intention metadata
+			}
+		}
+		log.Debugf("PipelineIntentionFilter: Including package with no pipeline_intention metadata")
+		return true // Include packages with no pipeline_intention metadata
+	}
+
+	// When pipeline_intention is set, only include packages that contain rules with matching pipeline_intention metadata
+	// This ensures only pipeline-specific rules are evaluated
+	for _, r := range rules {
+		for _, ruleIntention := range r.PipelineIntention {
+			for _, targetIntention := range f.targetIntentions {
+				if ruleIntention == targetIntention {
+					log.Debugf("PipelineIntentionFilter: Including package with matching pipeline_intention: %s", targetIntention)
+					return true // Include packages with matching pipeline_intention metadata
+				}
+			}
+		}
+	}
+	log.Debugf("PipelineIntentionFilter: Excluding package with no matching pipeline_intention metadata")
+	return false // Exclude packages with no matching pipeline_intention metadata
+}
+
+//////////////////////////////////////////////////////////////////////////////
 // NamespaceFilter – applies all filters (logical AND)
 //////////////////////////////////////////////////////////////////////////////
 
@@ -113,6 +220,31 @@ func (nf *NamespaceFilter) Filter(rules policyRules) []string {
 // and applies it to the given rules.
 func filterNamespaces(r policyRules, filters ...RuleFilter) []string {
 	return NewNamespaceFilter(filters...).Filter(r)
+}
+
+// extractStringFromRuleData extracts a single string value from the ruleData JSON.
+//
+// This function is similar to extractStringArrayFromRuleData but extracts a single
+// string value instead of an array. It's used for configuration values that are
+// single strings rather than arrays.
+func extractStringFromRuleData(src ecc.Source, key string) string {
+	if src.RuleData == nil {
+		return ""
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal(src.RuleData.Raw, &data); err != nil {
+		log.Debugf("Failed to unmarshal ruleData: %v", err)
+		return ""
+	}
+
+	if value, exists := data[key]; exists {
+		if str, ok := value.(string); ok {
+			return str
+		}
+		log.Debugf("RuleData key '%s' is not a string: %T", key, value)
+	}
+	return ""
 }
 
 // extractStringArrayFromRuleData returns a string slice for `key`.

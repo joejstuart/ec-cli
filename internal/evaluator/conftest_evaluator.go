@@ -207,7 +207,8 @@ type conftestEvaluator struct {
 	fs            afero.Fs
 	namespace     []string
 	source        ecc.Source
-	ruleSelector  RuleSelector // NEW: Unified rule selector
+	ruleSelector  RuleSelector  // NEW: Unified rule selector
+	filterFactory FilterFactory // NEW: Configurable filter factory
 }
 
 type conftestRunner struct {
@@ -291,8 +292,13 @@ func NewConftestEvaluator(ctx context.Context, policySources []source.PolicySour
 	return NewConftestEvaluatorWithNamespace(ctx, policySources, p, source, []string{})
 }
 
-// set the policy namespace
-func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, namespace []string) (Evaluator, error) {
+// NewConftestEvaluatorWithFilterFactory creates an evaluator with a custom filter factory
+func NewConftestEvaluatorWithFilterFactory(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, filterFactory FilterFactory) (Evaluator, error) {
+	return NewConftestEvaluatorWithNamespaceAndFilterFactory(ctx, policySources, p, source, []string{}, filterFactory)
+}
+
+// NewConftestEvaluatorWithNamespaceAndFilterFactory creates an evaluator with namespace and custom filter factory
+func NewConftestEvaluatorWithNamespaceAndFilterFactory(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, namespace []string, filterFactory FilterFactory) (Evaluator, error) {
 	if trace.IsEnabled() {
 		r := trace.StartRegion(ctx, "ec:conftest-create-evaluator")
 		defer r.End()
@@ -306,6 +312,7 @@ func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []sour
 		fs:            fs,
 		namespace:     namespace,
 		source:        source,
+		filterFactory: filterFactory, // Use the provided filter factory
 	}
 
 	c.include, c.exclude = computeIncludeExclude(source, p)
@@ -337,6 +344,18 @@ func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []sour
 
 	log.Debug("Conftest test runner created")
 	return c, nil
+}
+
+// set the policy namespace
+func NewConftestEvaluatorWithNamespace(ctx context.Context, policySources []source.PolicySource, p ConfigProvider, source ecc.Source, namespace []string) (Evaluator, error) {
+	// Use default unified filter factory
+	imageContext := &ImageContext{
+		Time: p.EffectiveTime(),
+	}
+	ruleSelector := NewUnifiedRuleSelector(source, p, imageContext)
+	filterFactory := NewUnifiedFilterFactory(ruleSelector)
+
+	return NewConftestEvaluatorWithNamespaceAndFilterFactory(ctx, policySources, p, source, namespace, filterFactory)
 }
 
 // Destroy removes the working directory
@@ -465,9 +484,8 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 		}
 	}
 
-	// Filter namespaces using the new unified filtering system
-	filterFactory := NewUnifiedFilterFactory(c.ruleSelector)
-	filters := filterFactory.CreateFilters(c.source)
+	// Filter namespaces using the configured filtering system
+	filters := c.filterFactory.CreateFilters(c.source)
 	// Combine annotated and non-annotated rules for filtering
 	allRules := make(policyRules)
 	for code, rule := range rules {
@@ -487,8 +505,10 @@ func (c conftestEvaluator) Evaluate(ctx context.Context, target EvaluationTarget
 		}
 	}
 
-	// Set all rules in the selector for analysis
-	c.ruleSelector.SetAllRules(allRules)
+	// Set all rules in the selector for analysis (if using unified filtering)
+	if c.ruleSelector != nil {
+		c.ruleSelector.SetAllRules(allRules)
+	}
 	filteredNamespaces := filterNamespaces(allRules, filters...)
 
 	var r testRunner
@@ -948,12 +968,30 @@ func isResultEffective(failure Result, now time.Time) bool {
 // discarded based on the policy configuration.
 // 'missingIncludes' is a list of include directives that gets pruned if the result is matched
 func (c conftestEvaluator) isResultIncluded(result Result, target string, missingIncludes map[string]bool) bool {
-	// Use the unified rule selector instead of the current scoring logic
 	ruleID := ExtractStringFromMetadata(result, metadataCode)
-	imageDigest := c.extractImageDigest(target)
-	effectiveTime := c.policy.EffectiveTime()
+	if ruleID == "" {
+		return false
+	}
 
-	return c.ruleSelector.ShouldReport(ruleID, imageDigest, effectiveTime)
+	// Get the rule info for this result
+	rule, exists := c.ruleSelector.(*UnifiedRuleSelector)
+	if !exists {
+		// Fallback to simple rule selector logic
+		imageDigest := c.extractImageDigest(target)
+		effectiveTime := c.policy.EffectiveTime()
+		return c.ruleSelector.ShouldReport(ruleID, imageDigest, effectiveTime)
+	}
+
+	// Use the unified rule selector's scoring logic to properly handle missingIncludes
+	matchers := rule.makeMatchers(ruleID, rule.allRules[ruleID])
+
+	includeScore := rule.scoreMatches(matchers, rule.config.Include, missingIncludes)
+	excludeScore := rule.scoreMatches(matchers, rule.config.Exclude, map[string]bool{})
+
+	included := includeScore > excludeScore
+	log.Debugf("Result %s: include score=%d, exclude score=%d, included=%v", ruleID, includeScore, excludeScore, included)
+
+	return included
 }
 
 // extractImageDigest extracts the image digest from the target string

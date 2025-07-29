@@ -141,6 +141,216 @@ func TestUnifiedRuleFilterWithEmptySelector(t *testing.T) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// PipelineIntentionFilterFactory tests
+//////////////////////////////////////////////////////////////////////////////
+
+func TestPipelineIntentionFilterFactory(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      ecc.Source
+		wantFilters int
+	}{
+		{
+			name:        "no config",
+			source:      ecc.Source{},
+			wantFilters: 1, // Always creates one filter
+		},
+		{
+			name:        "pipeline intention only",
+			source:      makeSource(`{"pipeline_intention":"release"}`, nil),
+			wantFilters: 1,
+		},
+		{
+			name:        "multiple pipeline intentions",
+			source:      makeSource(`{"pipeline_intention":["release","production"]}`, nil),
+			wantFilters: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			factory := NewPipelineIntentionFilterFactory()
+			filters := factory.CreateFilters(tc.source)
+			assert.Len(t, filters, tc.wantFilters, tc.name)
+
+			// Test that the filter is a PipelineIntentionFilter
+			pipelineFilter, ok := filters[0].(*PipelineIntentionFilter)
+			assert.True(t, ok, "Filter should be a PipelineIntentionFilter")
+			assert.NotNil(t, pipelineFilter, "Filter should not be nil")
+		})
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// PipelineIntentionFilter tests
+//////////////////////////////////////////////////////////////////////////////
+
+func TestPipelineIntentionFilter(t *testing.T) {
+	rules := policyRules{
+		"release.rule1": {PipelineIntention: []string{"release"}},
+		"release.rule2": {PipelineIntention: []string{"release", "production"}},
+		"dev.rule1":     {PipelineIntention: []string{"dev"}},
+		"general.rule1": {}, // No pipeline_intention metadata
+		"general.rule2": {}, // No pipeline_intention metadata
+	}
+
+	tests := []struct {
+		name        string
+		intentions  []string
+		wantPkgs    []string
+		description string
+	}{
+		{
+			name:        "no intentions - only packages with no pipeline_intention metadata",
+			intentions:  nil,
+			wantPkgs:    []string{"general"}, // Only general has no pipeline_intention metadata
+			description: "When no pipeline_intention is configured, only rules without pipeline_intention metadata are evaluated",
+		},
+		{
+			name:        "single intention - only packages with matching pipeline_intention metadata",
+			intentions:  []string{"release"},
+			wantPkgs:    []string{"release"}, // Only release has matching pipeline_intention metadata
+			description: "When pipeline_intention is set, only rules with matching pipeline_intention metadata are evaluated",
+		},
+		{
+			name:        "multiple intentions - packages with any matching pipeline_intention metadata",
+			intentions:  []string{"release", "dev"},
+			wantPkgs:    []string{"release", "dev"}, // Both have matching pipeline_intention metadata
+			description: "When multiple pipeline_intentions are set, rules with any matching metadata are evaluated",
+		},
+		{
+			name:        "non-existent intention - no packages included",
+			intentions:  []string{"staging"},
+			wantPkgs:    []string{}, // No packages have matching pipeline_intention metadata
+			description: "When pipeline_intention doesn't match any rules, no packages are evaluated",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filter := NewPipelineIntentionFilter(tc.intentions)
+			got := filterNamespaces(rules, filter)
+			assert.ElementsMatch(t, tc.wantPkgs, got, tc.description)
+		})
+	}
+}
+
+func TestPipelineIntentionFilterWithRulesWithoutMetadata(t *testing.T) {
+	// This test demonstrates how filtering works with rules that don't have
+	// pipeline_intention metadata, like the example fail_with_data.rego rule.
+	rules := policyRules{
+		"main.fail_with_data": {}, // Rule without any metadata (like fail_with_data.rego)
+		"release.security":    {PipelineIntention: []string{"release"}},
+		"dev.validation":      {PipelineIntention: []string{"dev"}},
+		"general.basic":       {}, // Another rule without metadata
+	}
+
+	tests := []struct {
+		name        string
+		intentions  []string
+		expectedPkg []string
+		description string
+	}{
+		{
+			name:        "no pipeline_intention - only rules without metadata",
+			intentions:  nil,
+			expectedPkg: []string{"main", "general"}, // Only packages with rules that have no pipeline_intention metadata
+			description: "When no pipeline_intention is configured, only rules without pipeline_intention metadata are evaluated",
+		},
+		{
+			name:        "pipeline_intention set - only rules with matching metadata",
+			intentions:  []string{"release"},
+			expectedPkg: []string{"release"}, // Only package with matching pipeline_intention metadata
+			description: "When pipeline_intention is set, only rules with matching pipeline_intention metadata are evaluated",
+		},
+		{
+			name:        "pipeline_intention set with multiple values",
+			intentions:  []string{"release", "dev"},
+			expectedPkg: []string{"release", "dev"}, // Both packages have matching pipeline_intention metadata
+			description: "When multiple pipeline_intentions are set, rules with any matching metadata are evaluated",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filter := NewPipelineIntentionFilter(tc.intentions)
+			got := filterNamespaces(rules, filter)
+			assert.ElementsMatch(t, tc.expectedPkg, got, tc.description)
+		})
+	}
+}
+
+func TestPipelineIntentionFilterCorrectRelationship(t *testing.T) {
+	// Test the correct relationship:
+	// - Policy Config: pipeline_intention is a SINGLE string (e.g., "release")
+	// - Rule Metadata: pipeline_intention is a LIST of strings (e.g., ["release", "production"])
+
+	tests := []struct {
+		name            string
+		configIntention string   // Single string from policy config
+		ruleIntentions  []string // List of strings from rule metadata
+		expectedInclude bool
+	}{
+		{
+			name:            "Config has 'release', rule has ['release', 'production'] - should include",
+			configIntention: "release",
+			ruleIntentions:  []string{"release", "production"},
+			expectedInclude: true,
+		},
+		{
+			name:            "Config has 'release', rule has ['staging'] - should exclude",
+			configIntention: "release",
+			ruleIntentions:  []string{"staging"},
+			expectedInclude: false,
+		},
+		{
+			name:            "Config has 'release', rule has no pipeline_intention - should exclude",
+			configIntention: "release",
+			ruleIntentions:  []string{},
+			expectedInclude: false,
+		},
+		{
+			name:            "Config has no pipeline_intention, rule has ['release'] - should exclude",
+			configIntention: "",
+			ruleIntentions:  []string{"release"},
+			expectedInclude: false,
+		},
+		{
+			name:            "Config has no pipeline_intention, rule has no pipeline_intention - should include",
+			configIntention: "",
+			ruleIntentions:  []string{},
+			expectedInclude: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create filter with single intention from config
+			var targetIntentions []string
+			if tt.configIntention != "" {
+				targetIntentions = []string{tt.configIntention}
+			}
+			filter := NewPipelineIntentionFilter(targetIntentions)
+
+			// Create rule with list of intentions
+			rules := []rule.Info{
+				{
+					Code:              "test.rule",
+					Package:           "test",
+					ShortName:         "rule",
+					PipelineIntention: tt.ruleIntentions,
+				},
+			}
+
+			// Test the filter
+			result := filter.Include("test", rules)
+			assert.Equal(t, tt.expectedInclude, result,
+				"Config intention: '%s', Rule intentions: %v", tt.configIntention, tt.ruleIntentions)
+		})
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////////
 // NamespaceFilter tests
 //////////////////////////////////////////////////////////////////////////////
 

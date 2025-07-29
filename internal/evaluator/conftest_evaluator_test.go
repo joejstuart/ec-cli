@@ -1309,6 +1309,28 @@ func TestConftestEvaluatorIncludeExclude(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "collection @redhat should not generate warning when rules have @redhat collection",
+			results: []Outcome{
+				{
+					Failures: []Result{
+						{Metadata: map[string]any{"code": "security.cve", "collections": []any{"redhat"}}},
+						{Metadata: map[string]any{"code": "other.rule"}},
+					},
+				},
+			},
+			config: &ecc.EnterpriseContractPolicyConfiguration{Include: []string{"@redhat"}},
+			want: []Outcome{
+				{
+					Skipped:    []Result{},
+					Warnings:   []Result{},
+					Exceptions: []Result{},
+					Failures: []Result{
+						{Metadata: map[string]any{"code": "security.cve", "collections": []string{"redhat"}}},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
