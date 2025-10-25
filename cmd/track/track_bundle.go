@@ -108,58 +108,8 @@ func trackBundleCmd(track trackBundleFn, pullImage pullImageFn, pushImage pushIm
 
 		Args:    cobra.NoArgs,
 		Aliases: []string{"tekton-task"},
-		RunE: func(cmd *cobra.Command, args []string) (err error) {
-			// capture the command and arguments so we can keep track of what
-			// Tekton bundles were used to getnerate the OPA/Conftest bundle
-			invocation := strings.Join(os.Args, " ")
-			fs := utils.FS(cmd.Context())
-
-			var data []byte
-			if strings.HasPrefix(params.input, "oci:") {
-				data, err = pullImage(cmd.Context(), strings.TrimPrefix(params.input, "oci:"))
-			} else if params.input != "" {
-				data, err = afero.ReadFile(fs, params.input)
-			}
-			if err != nil {
-				return err
-			}
-
-			urls := append(params.bundles, params.gits...)
-
-			out, err := track(cmd.Context(), urls, data, params.prune, params.freshen, params.inEffectDays)
-			if err != nil {
-				return err
-			}
-
-			switch {
-			case params.output == "":
-				_, err = cmd.OutOrStdout().Write(out)
-			case strings.HasPrefix(params.output, "oci:"):
-				err = pushImage(cmd.Context(), strings.TrimPrefix(params.output, "oci:"), out, invocation)
-			default:
-				err = afero.WriteFile(fs, params.output, out, 0666)
-			}
-
-			if err != nil {
-				return
-			}
-
-			if params.replace && params.input != "" {
-				if strings.HasPrefix(params.input, "oci:") {
-					err = pushImage(cmd.Context(), strings.TrimPrefix(params.input, "oci:"), out, invocation)
-				} else {
-					var perm os.FileMode
-					if stat, err := fs.Stat(params.input); err != nil {
-						return err
-					} else {
-						perm = stat.Mode()
-					}
-
-					err = afero.WriteFile(fs, params.input, out, perm)
-				}
-			}
-
-			return
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return executeTrackBundle(cmd, params, track, pullImage, pushImage)
 		},
 	}
 
@@ -186,4 +136,82 @@ func trackBundleCmd(track trackBundleFn, pullImage pullImageFn, pushImage pushIm
 	cmd.MarkFlagsOneRequired("bundle", "git", "input")
 
 	return cmd
+}
+
+// executeTrackBundle handles the main logic for the track bundle command
+func executeTrackBundle(cmd *cobra.Command, params struct {
+	bundles      []string
+	gits         []string
+	input        string
+	prune        bool
+	replace      bool
+	output       string
+	freshen      bool
+	inEffectDays int
+}, track trackBundleFn, pullImage pullImageFn, pushImage pushImageFn) error {
+	// capture the command and arguments so we can keep track of what
+	// Tekton bundles were used to getnerate the OPA/Conftest bundle
+	invocation := strings.Join(os.Args, " ")
+	fs := utils.FS(cmd.Context())
+
+	data, err := loadInputData(fs, params.input, pullImage)
+	if err != nil {
+		return err
+	}
+
+	urls := append(params.bundles, params.gits...)
+
+	out, err := track(cmd.Context(), urls, data, params.prune, params.freshen, params.inEffectDays)
+	if err != nil {
+		return err
+	}
+
+	if err := writeOutput(cmd, fs, params.output, out, invocation, pushImage); err != nil {
+		return err
+	}
+
+	if params.replace && params.input != "" {
+		return handleReplace(fs, params.input, out, invocation, pushImage)
+	}
+
+	return nil
+}
+
+// loadInputData loads input data from file or OCI registry
+func loadInputData(fs afero.Fs, input string, pullImage pullImageFn) ([]byte, error) {
+	if strings.HasPrefix(input, "oci:") {
+		return pullImage(context.Background(), strings.TrimPrefix(input, "oci:"))
+	}
+	if input != "" {
+		return afero.ReadFile(fs, input)
+	}
+	return nil, nil
+}
+
+// writeOutput writes the output to stdout, file, or OCI registry
+func writeOutput(cmd *cobra.Command, fs afero.Fs, output string, out []byte, invocation string, pushImage pushImageFn) error {
+	switch {
+	case output == "":
+		_, err := cmd.OutOrStdout().Write(out)
+		return err
+	case strings.HasPrefix(output, "oci:"):
+		return pushImage(cmd.Context(), strings.TrimPrefix(output, "oci:"), out, invocation)
+	default:
+		return afero.WriteFile(fs, output, out, 0666)
+	}
+}
+
+// handleReplace handles the replace logic for input files
+func handleReplace(fs afero.Fs, input string, out []byte, invocation string, pushImage pushImageFn) error {
+	if strings.HasPrefix(input, "oci:") {
+		return pushImage(context.Background(), strings.TrimPrefix(input, "oci:"), out, invocation)
+	}
+
+	stat, err := fs.Stat(input)
+	if err != nil {
+		return err
+	}
+	perm := stat.Mode()
+
+	return afero.WriteFile(fs, input, out, perm)
 }

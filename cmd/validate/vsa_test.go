@@ -537,18 +537,7 @@ func TestValidateVSAInput(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateVSAInput(tt.data, tt.args)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorMsg)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	runVSAInputTests(t, tests)
 }
 
 func TestValidateVSAInput_EdgeCases(t *testing.T) {
@@ -643,18 +632,7 @@ func TestValidateVSAInput_EdgeCases(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateVSAInput(tt.data, tt.args)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorMsg)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	runVSAInputTests(t, tests)
 }
 
 // TestParseEffectiveTime tests the parseEffectiveTime function
@@ -1148,42 +1126,8 @@ func TestProcessSnapshotComponent(t *testing.T) {
 			},
 			expectError: false,
 		},
-		{
-			name: "component with invalid image reference",
-			component: app.SnapshotComponent{
-				Name:           "test-component",
-				ContainerImage: "invalid:image:reference:",
-			},
-			data: &validateVSAData{
-				vsaExpiration:               24 * time.Hour,
-				ignoreSignatureVerification: true,
-				policySpec: ecapi.EnterpriseContractPolicySpec{
-					Sources: []ecapi.Source{
-						{Name: "test", Policy: []string{"test-policy"}},
-					},
-				},
-			},
-			expectError: true,
-			errorMsg:    "failed to extract digest",
-		},
-		{
-			name: "component with empty image reference",
-			component: app.SnapshotComponent{
-				Name:           "test-component",
-				ContainerImage: "",
-			},
-			data: &validateVSAData{
-				vsaExpiration:               24 * time.Hour,
-				ignoreSignatureVerification: true,
-				policySpec: ecapi.EnterpriseContractPolicySpec{
-					Sources: []ecapi.Source{
-						{Name: "test", Policy: []string{"test-policy"}},
-					},
-				},
-			},
-			expectError: true,
-			errorMsg:    "failed to extract digest",
-		},
+		createInvalidImageTest("component with invalid image reference", "invalid:image:reference:"),
+		createInvalidImageTest("component with empty image reference", ""),
 	}
 
 	for _, tt := range tests {
@@ -1206,6 +1150,28 @@ func TestProcessSnapshotComponent(t *testing.T) {
 
 			assert.Equal(t, tt.component.Name, result.ComponentName)
 			assert.Equal(t, tt.component.ContainerImage, result.ImageRef)
+		})
+	}
+}
+
+// runVSAInputTests runs a set of VSA input validation tests
+func runVSAInputTests(t *testing.T, tests []struct {
+	name        string
+	data        *validateVSAData
+	args        []string
+	expectError bool
+	errorMsg    string
+}) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateVSAInput(tt.data, tt.args)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

@@ -30,7 +30,7 @@ import (
 
 // ValidationData represents the data needed for VSA validation
 type ValidationData struct {
-	Retriever                   VSARetriever
+	Retriever                   Retriever
 	VSAExpiration               time.Duration
 	IgnoreSignatureVerification bool
 	PublicKeyPath               string
@@ -155,7 +155,7 @@ func ExtractPolicyFromVSA(predicate *Predicate) (ecapi.EnterpriseContractPolicyS
 
 // CompareVSAPolicyWithDetails compares VSA policy with supplied policy and returns detailed differences
 func CompareVSAPolicyWithDetails(vsaPolicy ecapi.EnterpriseContractPolicySpec, suppliedPolicy ecapi.EnterpriseContractPolicySpec, effectiveTime time.Time, imageInfo *equivalence.ImageInfo) (bool, []equivalence.PolicyDifference, error) {
-	checker := equivalence.NewEquivalenceChecker(effectiveTime, imageInfo)
+	checker := equivalence.NewChecker(effectiveTime, imageInfo)
 
 	equivalent, differences, err := checker.AreEquivalentWithDifferences(vsaPolicy, suppliedPolicy)
 	if err != nil {
@@ -189,7 +189,7 @@ func FormatPolicyDifferences(differences []equivalence.PolicyDifference) string 
 		added, removed, changed, len(differences)))
 
 	// Generate unified diff output
-	checker := &equivalence.EquivalenceChecker{}
+	checker := &equivalence.Checker{}
 	unifiedDiff := checker.GenerateUnifiedDiffOutputWithLabels(differences, "VSA Policy", "Release Policy")
 	sb.WriteString(unifiedDiff)
 

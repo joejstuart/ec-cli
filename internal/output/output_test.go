@@ -476,6 +476,54 @@ func Test_Violations(t *testing.T) {
 	}
 }
 
+// Helper functions to reduce duplication in test cases
+func createVerificationStatus(passed bool, message, code, title string) VerificationStatus {
+	if passed {
+		return VerificationStatus{
+			Passed: true,
+			Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
+				"code":  code,
+				"title": title,
+			}},
+		}
+	}
+	return VerificationStatus{
+		Passed: false,
+		Result: &evaluator.Result{Message: message, Metadata: map[string]interface{}{
+			"code":  code,
+			"title": title,
+		}},
+	}
+}
+
+func createImageSignatureStatus(passed bool, message string) VerificationStatus {
+	return createVerificationStatus(passed, message, "builtin.image.signature_check", "Image signature check passed")
+}
+
+func createAttestationSignatureStatus(passed bool, message string) VerificationStatus {
+	return createVerificationStatus(passed, message, "builtin.attestation.signature_check", "Attestation signature check passed")
+}
+
+func createImageAccessibleStatus() VerificationStatus {
+	return VerificationStatus{
+		Passed: true,
+		Result: &evaluator.Result{Message: "image accessible passed"},
+	}
+}
+
+func createAttestationSyntaxStatus(passed bool, message string) VerificationStatus {
+	return createVerificationStatus(passed, message, "builtin.attestation.syntax_check", "Attestation syntax check passed")
+}
+
+func createPolicyOutcome(successes []evaluator.Result, failures []evaluator.Result) []evaluator.Outcome {
+	return []evaluator.Outcome{
+		{
+			Successes: successes,
+			Failures:  failures,
+		},
+	}
+}
+
 func Test_Successes(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -485,40 +533,14 @@ func Test_Successes(t *testing.T) {
 		{
 			name: "passing",
 			output: Output{
-				ImageSignatureCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.image.signature_check",
-						"title": "Image signature check passed",
-					}},
-				},
-				AttestationSignatureCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.signature_check",
-						"title": "Attestation signature check passed",
-					}},
-				},
-				ImageAccessibleCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "image accessible passed"},
-				},
-				AttestationSyntaxCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.syntax_check",
-						"title": "Attestation syntax check passed",
-					}},
-				},
-				PolicyCheck: []evaluator.Outcome{
-					{
-						Successes: []evaluator.Result{
-							{
-								Message: "passed policy check",
-							},
-						},
-					},
-				},
+				ImageSignatureCheck:       createImageSignatureStatus(true, ""),
+				AttestationSignatureCheck: createAttestationSignatureStatus(true, ""),
+				ImageAccessibleCheck:      createImageAccessibleStatus(),
+				AttestationSyntaxCheck:    createAttestationSyntaxStatus(true, ""),
+				PolicyCheck: createPolicyOutcome(
+					[]evaluator.Result{{Message: "passed policy check"}},
+					nil,
+				),
 			},
 			expected: []evaluator.Result{
 				{Message: "passed policy check"},
@@ -539,31 +561,10 @@ func Test_Successes(t *testing.T) {
 		{
 			name: "failing image signature",
 			output: Output{
-				ImageSignatureCheck: VerificationStatus{
-					Passed: false,
-					Result: &evaluator.Result{Message: "Image signature check failed", Metadata: map[string]interface{}{
-						"code":  "builtin.image.signature_check",
-						"title": "Image signature check passed",
-					}},
-				},
-				AttestationSignatureCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.signature_check",
-						"title": "Attestation signature check passed",
-					}},
-				},
-				ImageAccessibleCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "image accessible passed"},
-				},
-				AttestationSyntaxCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.syntax_check",
-						"title": "Attestation syntax check passed",
-					}},
-				},
+				ImageSignatureCheck:       createImageSignatureStatus(false, "Image signature check failed"),
+				AttestationSignatureCheck: createAttestationSignatureStatus(true, ""),
+				ImageAccessibleCheck:      createImageAccessibleStatus(),
+				AttestationSyntaxCheck:    createAttestationSyntaxStatus(true, ""),
 			},
 			expected: []evaluator.Result{
 				{Message: "Pass", Metadata: map[string]interface{}{
@@ -579,40 +580,14 @@ func Test_Successes(t *testing.T) {
 		{
 			name: "failing attestation signature",
 			output: Output{
-				ImageSignatureCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.image.signature_check",
-						"title": "Image signature check passed",
-					}},
-				},
-				AttestationSignatureCheck: VerificationStatus{
-					Passed: false,
-					Result: &evaluator.Result{Message: "Attestation check failed", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.signature_check",
-						"title": "Attestation signature check passed",
-					}},
-				},
-				ImageAccessibleCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "image accessible passed"},
-				},
-				AttestationSyntaxCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.syntax_check",
-						"title": "Attestation syntax check passed",
-					}},
-				},
-				PolicyCheck: []evaluator.Outcome{
-					{
-						Successes: []evaluator.Result{
-							{
-								Message: "passed policy check",
-							},
-						},
-					},
-				},
+				ImageSignatureCheck:       createImageSignatureStatus(true, ""),
+				AttestationSignatureCheck: createAttestationSignatureStatus(false, "Attestation check failed"),
+				ImageAccessibleCheck:      createImageAccessibleStatus(),
+				AttestationSyntaxCheck:    createAttestationSyntaxStatus(true, ""),
+				PolicyCheck: createPolicyOutcome(
+					[]evaluator.Result{{Message: "passed policy check"}},
+					nil,
+				),
 			},
 			expected: []evaluator.Result{
 				{Message: "passed policy check"},
@@ -629,40 +604,14 @@ func Test_Successes(t *testing.T) {
 		{
 			name: "failing policy check",
 			output: Output{
-				ImageSignatureCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.image.signature_check",
-						"title": "Image signature check passed",
-					}},
-				},
-				AttestationSignatureCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.signature_check",
-						"title": "Attestation signature check passed",
-					}},
-				},
-				ImageAccessibleCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "image accessible passed"},
-				},
-				AttestationSyntaxCheck: VerificationStatus{
-					Passed: true,
-					Result: &evaluator.Result{Message: "Pass", Metadata: map[string]interface{}{
-						"code":  "builtin.attestation.syntax_check",
-						"title": "Attestation syntax check passed",
-					}},
-				},
-				PolicyCheck: []evaluator.Outcome{
-					{
-						Failures: []evaluator.Result{
-							{
-								Message: "failed policy check",
-							},
-						},
-					},
-				},
+				ImageSignatureCheck:       createImageSignatureStatus(true, ""),
+				AttestationSignatureCheck: createAttestationSignatureStatus(true, ""),
+				ImageAccessibleCheck:      createImageAccessibleStatus(),
+				AttestationSyntaxCheck:    createAttestationSyntaxStatus(true, ""),
+				PolicyCheck: createPolicyOutcome(
+					nil,
+					[]evaluator.Result{{Message: "failed policy check"}},
+				),
 			},
 			expected: []evaluator.Result{
 				{Message: "Pass", Metadata: map[string]interface{}{

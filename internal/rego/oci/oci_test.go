@@ -38,6 +38,18 @@ import (
 	"github.com/conforma/cli/internal/utils/oci/fake"
 )
 
+// createTestPlatform creates a test platform with the given parameters
+func createTestPlatform(arch, os, osVersion string, osFeatures, features []string, variant string) *v1.Platform {
+	return &v1.Platform{
+		Architecture: arch,
+		OS:           os,
+		OSVersion:    osVersion,
+		OSFeatures:   osFeatures,
+		Variant:      variant,
+		Features:     features,
+	}
+}
+
 func TestOCIBlob(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -136,14 +148,7 @@ func TestOCIDescriptorManifest(t *testing.T) {
 					"config.annotation.1": "config.annotation.value.1",
 					"config.annotation.2": "config.annotation.value.2",
 				},
-				Platform: &v1.Platform{
-					Architecture: "arch",
-					OS:           "os",
-					OSVersion:    "os-version",
-					OSFeatures:   []string{"os-feature-1", "os-feature-2"},
-					Variant:      "variant",
-					Features:     []string{"feature-1", "feature-2"},
-				},
+				Platform:     createTestPlatform("arch", "os", "os-version", []string{"os-feature-1", "os-feature-2"}, []string{"feature-1", "feature-2"}, "variant"),
 				ArtifactType: "artifact-type",
 			},
 		},

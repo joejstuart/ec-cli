@@ -21,7 +21,7 @@ import (
 )
 
 // CreateVSARetriever creates the VSA retriever based on flags and identifier type
-func CreateVSARetriever(vsaRetrieval []string, vsaIdentifier string, images string) (VSARetriever, error) {
+func CreateVSARetriever(vsaRetrieval []string, vsaIdentifier string, images string) (Retriever, error) {
 	// If explicit retrieval backends are specified, use VSA library
 	if len(vsaRetrieval) > 0 {
 		retriever := CreateRetrieverFromUploadFlags(vsaRetrieval)

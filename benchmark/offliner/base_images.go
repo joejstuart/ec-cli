@@ -122,11 +122,11 @@ func baseImages(ref name.Reference) ([]name.Reference, error) {
 			fetch = fromSPDX
 		}
 
-		if more, err := fetch(layer); err != nil {
+		more, err := fetch(layer)
+		if err != nil {
 			return nil, err
-		} else {
-			refs = append(refs, more...)
 		}
+		refs = append(refs, more...)
 	}
 
 	return refs, nil

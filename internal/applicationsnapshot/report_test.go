@@ -261,8 +261,7 @@ func Test_GenerateMarkdownSummary(t *testing.T) {
 			assert.NoError(t, err)
 			report.created = time.Unix(0, 0).UTC()
 
-			markdownSummary, err := generateMarkdownSummary(&report)
-			assert.NoError(t, err)
+			markdownSummary := generateMarkdownSummary(&report)
 			snaps.MatchSnapshot(t, string(markdownSummary))
 		})
 	}
@@ -404,35 +403,8 @@ func Test_ReportSummary(t *testing.T) {
 			},
 		},
 		{
-			name: "with successes",
-			input: Component{
-				Violations: []evaluator.Result{
-					{
-						Message: "violation",
-						Metadata: map[string]interface{}{
-							"code": "violation",
-						},
-					},
-				},
-				Warnings: []evaluator.Result{
-					{
-						Message: "warning",
-						Metadata: map[string]interface{}{
-							"code": "warning",
-						},
-					},
-				},
-				Successes: []evaluator.Result{
-					{
-						Message: "success",
-						Metadata: map[string]interface{}{
-							"code": "success",
-						},
-					},
-				},
-				Success:      false,
-				SuccessCount: 1,
-			},
+			name:  "with successes",
+			input: createTestComponent(),
 			want: summary{
 				Components: []componentSummary{
 					{
@@ -453,34 +425,7 @@ func Test_ReportSummary(t *testing.T) {
 		{
 			name:     "with snapshot",
 			snapshot: "snappy",
-			input: Component{
-				Violations: []evaluator.Result{
-					{
-						Message: "violation",
-						Metadata: map[string]interface{}{
-							"code": "violation",
-						},
-					},
-				},
-				Warnings: []evaluator.Result{
-					{
-						Message: "warning",
-						Metadata: map[string]interface{}{
-							"code": "warning",
-						},
-					},
-				},
-				Successes: []evaluator.Result{
-					{
-						Message: "success",
-						Metadata: map[string]interface{}{
-							"code": "success",
-						},
-					},
-				},
-				Success:      false,
-				SuccessCount: 1,
-			},
+			input:    createTestComponent(),
 			want: summary{
 				Snapshot: "snappy",
 				Components: []componentSummary{
@@ -636,28 +581,7 @@ func Test_ReportAppstudio(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fs := afero.NewMemMapFs()
-			defaultWriter, err := fs.Create("default")
-			assert.NoError(t, err)
-
-			ctx := context.Background()
-			report, err := NewReport(c.snapshot, c.components, createTestPolicy(t, ctx), nil, true, true, nil)
-			assert.NoError(t, err)
-			assert.False(t, report.created.IsZero())
-			assert.Equal(t, c.success, report.Success)
-
-			report.created = time.Unix(0, 0).UTC()
-
-			p := format.NewTargetParser(JSON, format.Options{}, defaultWriter, fs)
-			assert.NoError(t, report.WriteAll([]string{"appstudio=report.json", "appstudio"}, p))
-
-			reportText, err := afero.ReadFile(fs, "report.json")
-			assert.NoError(t, err)
-			assert.JSONEq(t, c.expected, string(reportText))
-
-			defaultReportText, err := afero.ReadFile(fs, "default")
-			assert.NoError(t, err)
-			assert.JSONEq(t, c.expected, string(defaultReportText))
+			runReportTest(t, c, "appstudio=report.json", "appstudio")
 		})
 	}
 }
@@ -784,28 +708,7 @@ func Test_ReportHACBS(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fs := afero.NewMemMapFs()
-			defaultWriter, err := fs.Create("default")
-			assert.NoError(t, err)
-
-			ctx := context.Background()
-			report, err := NewReport(c.snapshot, c.components, createTestPolicy(t, ctx), nil, true, true, nil)
-			assert.NoError(t, err)
-			assert.False(t, report.created.IsZero())
-			assert.Equal(t, c.success, report.Success)
-
-			report.created = time.Unix(0, 0).UTC()
-
-			p := format.NewTargetParser(JSON, format.Options{}, defaultWriter, fs)
-			assert.NoError(t, report.WriteAll([]string{"hacbs=report.json", "hacbs"}, p))
-
-			reportText, err := afero.ReadFile(fs, "report.json")
-			assert.NoError(t, err)
-			assert.JSONEq(t, c.expected, string(reportText))
-
-			defaultReportText, err := afero.ReadFile(fs, "default")
-			assert.NoError(t, err)
-			assert.JSONEq(t, c.expected, string(defaultReportText))
+			runReportTest(t, c, "hacbs=report.json", "hacbs")
 		})
 	}
 }
@@ -1367,4 +1270,68 @@ func Test_ApplyOptions_ShowWarnings(t *testing.T) {
 	r.applyOptions(opts)
 
 	assert.False(t, r.ShowWarnings, "ShowWarnings should be updated to false after applying options")
+}
+
+// createTestComponent creates a test component with violations, warnings, and successes
+func createTestComponent() Component {
+	return Component{
+		Violations: []evaluator.Result{
+			{
+				Message: "violation",
+				Metadata: map[string]interface{}{
+					"code": "violation",
+				},
+			},
+		},
+		Warnings: []evaluator.Result{
+			{
+				Message: "warning",
+				Metadata: map[string]interface{}{
+					"code": "warning",
+				},
+			},
+		},
+		Successes: []evaluator.Result{
+			{
+				Message: "success",
+				Metadata: map[string]interface{}{
+					"code": "success",
+				},
+			},
+		},
+		Success:      false,
+		SuccessCount: 1,
+	}
+}
+
+// runReportTest runs a report test with the given parameters
+func runReportTest(t *testing.T, c struct {
+	name       string
+	expected   string
+	snapshot   string
+	components []Component
+	success    bool
+}, outputFile, outputFormat string) {
+	fs := afero.NewMemMapFs()
+	defaultWriter, err := fs.Create("default")
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	report, err := NewReport(c.snapshot, c.components, createTestPolicy(t, ctx), nil, true, true, nil)
+	assert.NoError(t, err)
+	assert.False(t, report.created.IsZero())
+	assert.Equal(t, c.success, report.Success)
+
+	report.created = time.Unix(0, 0).UTC()
+
+	p := format.NewTargetParser(JSON, format.Options{}, defaultWriter, fs)
+	assert.NoError(t, report.WriteAll([]string{outputFile, outputFormat}, p))
+
+	reportText, err := afero.ReadFile(fs, "report.json")
+	assert.NoError(t, err)
+	assert.JSONEq(t, c.expected, string(reportText))
+
+	defaultReportText, err := afero.ReadFile(fs, "default")
+	assert.NoError(t, err)
+	assert.JSONEq(t, c.expected, string(defaultReportText))
 }

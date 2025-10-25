@@ -107,8 +107,8 @@ format, including table, JSON, etc.
 	$ EC_EXPERIMENTAL=1 ec test --trace --output=json <input-file> 2>trace.log
 `
 
-// TestRun stores the compiler and store for a test run.
-type TestRun struct {
+// Run stores the compiler and store for a test run.
+type Run struct {
 	Compiler *ast.Compiler
 	Store    storage.Store
 }

@@ -71,8 +71,7 @@ func appstudioErrorHandler(noFail bool, prefix string, err error) error {
 
 		// So the exit code is zero
 		return nil
-	} else {
-		// "Normal" behavior, return the formatted error
-		return fmt.Errorf("%s: %w", prefix, err)
 	}
+	// "Normal" behavior, return the formatted error
+	return fmt.Errorf("%s: %w", prefix, err)
 }

@@ -83,85 +83,30 @@ Examples:
 }
 
 func runCompare(cmd *cobra.Command, args []string) error {
-
-	// Parse effective time
-	var effectiveTimeValue time.Time
-	switch effectiveTime {
-	case "now":
-		effectiveTimeValue = time.Now().UTC()
-	case "attestation":
-		// For now, use current time as default for attestation time
-		effectiveTimeValue = time.Now().UTC()
-	default:
-		var err error
-		effectiveTimeValue, err = time.Parse(time.RFC3339, effectiveTime)
-		if err != nil {
-			return fmt.Errorf("invalid effective time format: %w", err)
-		}
+	effectiveTimeValue, err := parseEffectiveTime()
+	if err != nil {
+		return err
 	}
 
-	// Create image info if provided
-	var imageInfo *equivalence.ImageInfo
-	if imageDigest != "" || imageRef != "" || imageURL != "" {
-		imageInfo = &equivalence.ImageInfo{
-			Digest: imageDigest,
-			Ref:    imageRef,
-			URL:    imageURL,
-		}
-	}
+	imageInfo := createImageInfo()
 
-	// Load first policy
 	spec1, err := loadPolicySpec(args[0])
 	if err != nil {
 		return fmt.Errorf("failed to load first policy: %w", err)
 	}
 
-	// Load second policy
 	spec2, err := loadPolicySpec(args[1])
 	if err != nil {
 		return fmt.Errorf("failed to load second policy: %w", err)
 	}
 
-	// Create equivalence checker
-	checker := equivalence.NewEquivalenceChecker(effectiveTimeValue, imageInfo)
-
-	// Compare policies
+	checker := equivalence.NewChecker(effectiveTimeValue, imageInfo)
 	equivalent, err := checker.AreEquivalent(spec1, spec2)
 	if err != nil {
 		return fmt.Errorf("failed to compare policies: %w", err)
 	}
 
-	// Output result
-	if outputFormat == "json" {
-		result := map[string]interface{}{
-			"equivalent":     equivalent,
-			"effective_time": effectiveTimeValue.Format(time.RFC3339),
-			"policy1":        args[0],
-			"policy2":        args[1],
-		}
-		if imageInfo != nil {
-			result["image_info"] = imageInfo
-		}
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
-	}
-
-	// Text output
-	if equivalent {
-		fmt.Println("✅ Policies are equivalent")
-	} else {
-		fmt.Println("❌ Policies are not equivalent")
-	}
-
-	fmt.Printf("Effective time: %s\n", effectiveTimeValue.Format(time.RFC3339))
-	if imageInfo != nil {
-		fmt.Printf("Image digest: %s\n", imageInfo.Digest)
-		fmt.Printf("Image ref: %s\n", imageInfo.Ref)
-		fmt.Printf("Image URL: %s\n", imageInfo.URL)
-	}
-
-	return nil
+	return outputComparisonResult(equivalent, effectiveTimeValue, imageInfo, args)
 }
 
 func loadPolicySpec(policyRef string) (ecc.EnterpriseContractPolicySpec, error) {
@@ -191,4 +136,75 @@ func loadPolicySpec(policyRef string) (ecc.EnterpriseContractPolicySpec, error) 
 	}
 
 	return ecp.Spec, nil
+}
+
+// parseEffectiveTime parses the effective time from the command line flag
+func parseEffectiveTime() (time.Time, error) {
+	switch effectiveTime {
+	case "now":
+		return time.Now().UTC(), nil
+	case "attestation":
+		// For now, use current time as default for attestation time
+		return time.Now().UTC(), nil
+	default:
+		effectiveTimeValue, err := time.Parse(time.RFC3339, effectiveTime)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid effective time format: %w", err)
+		}
+		return effectiveTimeValue, nil
+	}
+}
+
+// createImageInfo creates image info if provided
+func createImageInfo() *equivalence.ImageInfo {
+	if imageDigest == "" && imageRef == "" && imageURL == "" {
+		return nil
+	}
+	return &equivalence.ImageInfo{
+		Digest: imageDigest,
+		Ref:    imageRef,
+		URL:    imageURL,
+	}
+}
+
+// outputComparisonResult outputs the comparison result in the specified format
+func outputComparisonResult(equivalent bool, effectiveTimeValue time.Time, imageInfo *equivalence.ImageInfo, args []string) error {
+	if outputFormat == "json" {
+		return outputJSONResult(equivalent, effectiveTimeValue, imageInfo, args)
+	}
+	return outputTextResult(equivalent, effectiveTimeValue, imageInfo)
+}
+
+// outputJSONResult outputs the result in JSON format
+func outputJSONResult(equivalent bool, effectiveTimeValue time.Time, imageInfo *equivalence.ImageInfo, args []string) error {
+	result := map[string]interface{}{
+		"equivalent":     equivalent,
+		"effective_time": effectiveTimeValue.Format(time.RFC3339),
+		"policy1":        args[0],
+		"policy2":        args[1],
+	}
+	if imageInfo != nil {
+		result["image_info"] = imageInfo
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
+// outputTextResult outputs the result in text format
+func outputTextResult(equivalent bool, effectiveTimeValue time.Time, imageInfo *equivalence.ImageInfo) error {
+	if equivalent {
+		fmt.Println("✅ Policies are equivalent")
+	} else {
+		fmt.Println("❌ Policies are not equivalent")
+	}
+
+	fmt.Printf("Effective time: %s\n", effectiveTimeValue.Format(time.RFC3339))
+	if imageInfo != nil {
+		fmt.Printf("Image digest: %s\n", imageInfo.Digest)
+		fmt.Printf("Image ref: %s\n", imageInfo.Ref)
+		fmt.Printf("Image URL: %s\n", imageInfo.URL)
+	}
+
+	return nil
 }

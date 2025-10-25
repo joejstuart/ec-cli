@@ -26,13 +26,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_ValidatePolicyCmd(t *testing.T) {
+func Test_PolicyCmd(t *testing.T) {
 	validate := func(ctx context.Context, policyConfiguration string) error {
 		// Mock implementation of the validate function
 		return nil
 	}
 
-	cmd := ValidatePolicyCmd(validate)
+	cmd := PolicyCmd(validate)
 
 	t.Run("PreRunE", func(t *testing.T) {
 		// Test PreRunE function
@@ -53,7 +53,7 @@ func Test_ValidatePolicyErrors(t *testing.T) {
 		return errors.New("error")
 	}
 
-	cmd := ValidatePolicyCmd(validate)
+	cmd := PolicyCmd(validate)
 
 	t.Run("PreRunE", func(t *testing.T) {
 		// Test PreRunE function

@@ -35,6 +35,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// createMockRetrieverWithEntries creates a mock retriever with the given entries
+func createMockRetrieverWithEntries(entries []models.LogEntryAnon) *RekorVSARetriever {
+	mockClient := &MockRekorClient{entries: entries}
+	return NewRekorVSARetrieverWithClient(mockClient, DefaultRetrievalOptions())
+}
+
 // MockRekorAPI provides a mock implementation for testing the actual rekorClient with mocked client.Rekor dependency
 type MockRekorAPI struct {
 	searchIndexResult []string
@@ -307,8 +313,7 @@ func TestRekorVSARetriever_RetrieveVSA(t *testing.T) {
 }
 
 func TestRekorVSARetriever_RetrieveVSA_EmptyDigest(t *testing.T) {
-	mockClient := &MockRekorClient{entries: []models.LogEntryAnon{}}
-	retriever := NewRekorVSARetrieverWithClient(mockClient, DefaultRetrievalOptions())
+	retriever := createMockRetrieverWithEntries([]models.LogEntryAnon{})
 
 	_, err := retriever.RetrieveVSA(context.Background(), "")
 	assert.Error(t, err)
@@ -316,8 +321,7 @@ func TestRekorVSARetriever_RetrieveVSA_EmptyDigest(t *testing.T) {
 }
 
 func TestRekorVSARetriever_RetrieveVSA_NoEntries(t *testing.T) {
-	mockClient := &MockRekorClient{entries: []models.LogEntryAnon{}}
-	retriever := NewRekorVSARetrieverWithClient(mockClient, DefaultRetrievalOptions())
+	retriever := createMockRetrieverWithEntries([]models.LogEntryAnon{})
 
 	_, err := retriever.RetrieveVSA(context.Background(), "sha256:abcdef123456")
 	assert.Error(t, err)

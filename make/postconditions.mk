@@ -112,3 +112,44 @@ bench-smoke: ## Run quick benchmarks (ignored failures)
 
 # --- Default goal ---
 .DEFAULT_GOAL := ci
+
+# --- Sanity summary (JSON + jq) ---------------------------------------------
+
+SANITY_JSON ?= .sanity.json
+
+.PHONY: sanity-json
+sanity-json: ## Run sanity linters and write JSON to $(SANITY_JSON)
+	@$(GOLANGCI) run \
+	  -E dupl -E gocyclo -E goconst -E unparam -E ineffassign -E nestif \
+	  --out-format json \
+	  --max-issues-per-linter=0 --max-same-issues=0 \
+	  --issues-exit-code=0 \
+	  > $(SANITY_JSON)
+	@echo "Wrote $(SANITY_JSON)"
+
+.PHONY: sanity-summary
+sanity-summary: sanity-json ## Summarize sanity issues (grouped & worst offenders)
+	@command -v jq >/dev/null || { echo "jq is required"; exit 1; }
+	@echo "== Issues by linter =="; \
+	jq -r '.Issues | group_by(.FromLinter) | map({linter: .[0].FromLinter, count: length}) | sort_by(-.count) | (["linter","count"], (.[] | [ .linter, (.count|tostring) ]) ) | @tsv' $(SANITY_JSON) | column -t
+	@echo; echo "== Top files by issue count (top 10) =="; \
+	jq -r '.Issues | group_by(.Pos.Filename) | map({file: .[0].Pos.Filename, count: length}) | sort_by(-.count)[0:10] | (["file","count"], (.[] | [ .file, (.count|tostring) ])) | @tsv' $(SANITY_JSON) | column -t
+	@echo; echo "== Worst cyclomatic complexity (top 10) =="; \
+	jq -r '.Issues | map(select(.FromLinter=="gocyclo")) | map({file: .Pos.Filename, line: .Pos.Line, text: .Text, n: ( .Text | capture("(?<n>[0-9]+)"; "m")? | .n // "0") | tonumber}) | sort_by(-.n)[0:10] | (["complexity","file:line","message"], (.[] | [ ( .n|tostring ), ( .file + ":" + (.line|tostring) ), .text ])) | @tsv' $(SANITY_JSON) | column -t
+	@echo; echo "== Duplicate code (dupl) hot-spots (top 10) =="; \
+	jq -r '.Issues | map(select(.FromLinter=="dupl")) | group_by(.Pos.Filename) | map({file: .[0].Pos.Filename, count: length}) | sort_by(-.count)[0:10] | (["file","dupl_issues"], (.[] | [ .file, (.count|tostring) ])) | @tsv' $(SANITY_JSON) | column -t
+
+# Path to your installed CLI
+FFR ?= $(HOME)/go/bin/find-func-refs
+
+.PHONY: ffr
+ffr:
+	@test -x "$(FFR)" || { echo "find-func-refs not found at $(FFR)"; exit 1; }
+	@test -n "$(FILE)" || { echo "Usage: make ffr FILE=./path/to/file.go"; exit 1; }
+	@echo "Checking unused funcs in $(FILE)"
+	@$(FFR) -file "$(FILE)" -root . -snippet
+
+.PHONY: sanity-plus
+sanity-plus:
+	@$(MAKE) sanity
+	@$(MAKE) ffr FILE="$(FILE)"

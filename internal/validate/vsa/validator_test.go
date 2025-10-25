@@ -180,7 +180,7 @@ func TestValidateVSAWithPolicyComparison(t *testing.T) {
 	}
 }
 
-// enhancedMockVSARetriever is an enhanced mock implementation of VSARetriever for testing
+// enhancedMockVSARetriever is an enhanced mock implementation of Retriever for testing
 type enhancedMockVSARetriever struct {
 	shouldFind            bool
 	shouldExpire          bool

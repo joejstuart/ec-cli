@@ -37,6 +37,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Constants for entry types
+const (
+	entryTypeIntoto     = "intoto"
+	entryTypeIntotoV002 = "intoto-v002"
+	entryTypeDsse       = "dsse"
+	entryTypeUnknown    = "unknown"
+)
+
 // RekorVSARetriever implements VSARetriever using Rekor API
 type RekorVSARetriever struct {
 	client  RekorClient
@@ -201,76 +209,136 @@ func (r *RekorVSARetriever) extractImageDigest(identifier string) (string, error
 func (r *RekorVSARetriever) classifyEntryKind(entry models.LogEntryAnon) string {
 	// Prefer Body structure from the decoded Rekor body
 	body, err := r.decodeBodyJSON(entry)
-	if err == nil {
-		// Check for the top-level "kind" field which indicates the entry type
-		if kind, ok := body["kind"].(string); ok {
-			switch strings.ToLower(kind) {
-			case "intoto":
-				// Check API version to distinguish between 0.0.1 and 0.0.2
-				if apiVersion, ok := body["apiVersion"].(string); ok {
-					switch apiVersion {
-					case "0.0.2":
-						return "intoto-v002"
-					case "0.0.1":
-						return "intoto"
-					default:
-						// Default to 0.0.1 for backward compatibility
-						return "intoto"
-					}
-				}
-				// If no API version specified, check for embedded DSSE envelope structure
-				if spec, ok := body["spec"].(map[string]any); ok {
-					if content, ok := spec["content"].(map[string]any); ok {
-						if envelope, ok := content["envelope"].(map[string]any); ok {
-							// Check if this has both payload and signatures (0.0.2) or just payload (0.0.1)
-							if _, hasPayload := envelope["payload"]; hasPayload {
-								if _, hasSignatures := envelope["signatures"]; hasSignatures {
-									return "intoto-v002"
-								}
-								return "intoto"
-							}
-						}
-					}
-				}
-				return "intoto"
-			case "dsse":
-				return "dsse"
-			}
-		}
+	if err != nil {
+		return r.classifyFromAttestation(entry)
+	}
 
-		// Check for spec structure (in-toto 0.0.2 entries)
-		if spec, ok := body["spec"].(map[string]any); ok {
-			if content, ok := spec["content"].(map[string]any); ok {
-				if envelope, ok := content["envelope"].(map[string]any); ok {
-					// Check if this has both payloadType and signatures (0.0.2)
-					if _, hasPayloadType := envelope["payloadType"]; hasPayloadType {
-						if _, hasSignatures := envelope["signatures"]; hasSignatures {
-							return "intoto-v002"
-						}
-					}
-				}
-			}
-		}
+	// Check for the top-level "kind" field which indicates the entry type
+	if kind, ok := body["kind"].(string); ok {
+		return r.classifyFromKindField(body, kind)
+	}
 
-		// Fallback: check for top-level entry type indicators (legacy format)
-		if _, hasIntoto := body["intoto"]; hasIntoto {
-			return "intoto"
-		}
-		if _, hasDsse := body["dsse"]; hasDsse {
-			return "dsse"
+	// Check for spec structure (in-toto 0.0.2 entries)
+	if kind := r.classifyFromSpecStructure(body); kind != entryTypeUnknown {
+		return kind
+	}
+
+	// Fallback: check for top-level entry type indicators (legacy format)
+	return r.classifyFromLegacyFormat(body)
+}
+
+// classifyFromKindField classifies entry type based on the kind field
+func (r *RekorVSARetriever) classifyFromKindField(body map[string]any, kind string) string {
+	switch strings.ToLower(kind) {
+	case entryTypeIntoto:
+		return r.classifyIntotoVersion(body)
+	case entryTypeDsse:
+		return entryTypeDsse
+	}
+	return entryTypeUnknown
+}
+
+// classifyIntotoVersion determines the intoto version based on API version or structure
+func (r *RekorVSARetriever) classifyIntotoVersion(body map[string]any) string {
+	// Check API version to distinguish between 0.0.1 and 0.0.2
+	if apiVersion, ok := body["apiVersion"].(string); ok {
+		switch apiVersion {
+		case "0.0.2":
+			return entryTypeIntotoV002
+		case "0.0.1":
+			return entryTypeIntoto
+		default:
+			// Default to 0.0.1 for backward compatibility
+			return entryTypeIntoto
 		}
 	}
 
-	// Fallback (only if Body missing/unreadable): look at Attestation for VSA predicate (intoto hint)
-	if entry.Attestation != nil && entry.Attestation.Data != nil {
-		if attBytes, err := base64.StdEncoding.DecodeString(string(entry.Attestation.Data)); err == nil {
-			if strings.Contains(string(attBytes), "https://conforma.dev/verification_summary/v1") {
-				return "intoto"
-			}
+	// If no API version specified, check for embedded DSSE envelope structure
+	return r.classifyFromEnvelopeStructure(body)
+}
+
+// classifyFromEnvelopeStructure classifies based on envelope structure
+func (r *RekorVSARetriever) classifyFromEnvelopeStructure(body map[string]any) string {
+	spec, ok := body["spec"].(map[string]any)
+	if !ok {
+		return entryTypeIntoto
+	}
+
+	content, ok := spec["content"].(map[string]any)
+	if !ok {
+		return entryTypeIntoto
+	}
+
+	envelope, ok := content["envelope"].(map[string]any)
+	if !ok {
+		return entryTypeIntoto
+	}
+
+	// Check if this has both payload and signatures (0.0.2) or just payload (0.0.1)
+	if _, hasPayload := envelope["payload"]; hasPayload {
+		if _, hasSignatures := envelope["signatures"]; hasSignatures {
+			return entryTypeIntotoV002
+		}
+		return entryTypeIntoto
+	}
+
+	return entryTypeIntoto
+}
+
+// classifyFromSpecStructure classifies based on spec structure for 0.0.2 entries
+func (r *RekorVSARetriever) classifyFromSpecStructure(body map[string]any) string {
+	spec, ok := body["spec"].(map[string]any)
+	if !ok {
+		return entryTypeUnknown
+	}
+
+	content, ok := spec["content"].(map[string]any)
+	if !ok {
+		return entryTypeUnknown
+	}
+
+	envelope, ok := content["envelope"].(map[string]any)
+	if !ok {
+		return entryTypeUnknown
+	}
+
+	// Check if this has both payloadType and signatures (0.0.2)
+	if _, hasPayloadType := envelope["payloadType"]; hasPayloadType {
+		if _, hasSignatures := envelope["signatures"]; hasSignatures {
+			return entryTypeIntotoV002
 		}
 	}
 
-	return "unknown"
+	return entryTypeUnknown
+}
+
+// classifyFromLegacyFormat classifies based on legacy format indicators
+func (r *RekorVSARetriever) classifyFromLegacyFormat(body map[string]any) string {
+	if _, hasIntoto := body[entryTypeIntoto]; hasIntoto {
+		return entryTypeIntoto
+	}
+	if _, hasDsse := body[entryTypeDsse]; hasDsse {
+		return entryTypeDsse
+	}
+	return entryTypeUnknown
+}
+
+// classifyFromAttestation classifies based on attestation data
+func (r *RekorVSARetriever) classifyFromAttestation(entry models.LogEntryAnon) string {
+	if entry.Attestation == nil || entry.Attestation.Data == nil {
+		return entryTypeUnknown
+	}
+
+	attBytes, err := base64.StdEncoding.DecodeString(string(entry.Attestation.Data))
+	if err != nil {
+		return entryTypeUnknown
+	}
+
+	if strings.Contains(string(attBytes), "https://conforma.dev/verification_summary/v1") {
+		return entryTypeIntoto
+	}
+
+	return entryTypeUnknown
 }
 
 // RetrieveVSA retrieves the latest VSA data as a DSSE envelope for a given identifier
@@ -345,6 +413,44 @@ func (r *RekorVSARetriever) buildDSSEEnvelopeFromIntotoV002(entry models.LogEntr
 	}
 
 	// Navigate to the in-toto 0.0.2 structure
+	envelopeData, err := r.extractEnvelopeData(body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract payloadType
+	payloadType, ok := envelopeData["payloadType"].(string)
+	if !ok {
+		return nil, fmt.Errorf("envelope does not contain payloadType")
+	}
+
+	// Extract payload
+	payloadB64, err := r.extractPayload(entry, envelopeData)
+	if err != nil {
+		return nil, err
+	}
+
+	// Debug payload
+	r.debugPayload(payloadB64)
+
+	// Extract and convert signatures
+	signatures, err := r.extractSignatures(envelopeData)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build the ssldsse.Envelope
+	envelope := &ssldsse.Envelope{
+		PayloadType: payloadType,
+		Payload:     payloadB64,
+		Signatures:  signatures,
+	}
+
+	return envelope, nil
+}
+
+// extractEnvelopeData extracts the envelope data from the body
+func (r *RekorVSARetriever) extractEnvelopeData(body map[string]interface{}) (map[string]interface{}, error) {
 	spec, ok := body["spec"].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("entry does not contain spec")
@@ -360,63 +466,83 @@ func (r *RekorVSARetriever) buildDSSEEnvelopeFromIntotoV002(entry models.LogEntr
 		return nil, fmt.Errorf("content does not contain envelope")
 	}
 
-	// Extract payloadType
-	payloadType, ok := envelopeData["payloadType"].(string)
-	if !ok {
-		return nil, fmt.Errorf("envelope does not contain payloadType")
-	}
+	return envelopeData, nil
+}
 
+// extractPayload extracts and encodes the payload
+func (r *RekorVSARetriever) extractPayload(entry models.LogEntryAnon, envelopeData map[string]interface{}) (string, error) {
 	// Prefer Attestation.Data (needs base64-encoding); fallback to content.envelope.payload
-	var payloadB64 string
-
-	// First, try to get payload from Attestation.Data (needs to be base64-encoded)
 	if entry.Attestation != nil && entry.Attestation.Data != nil {
 		log.Debugf("Using payload from Attestation.Data (length: %d)", len(entry.Attestation.Data))
 		// Attestation.Data contains raw JSON, need to base64-encode it
-		payloadB64 = base64.StdEncoding.EncodeToString(entry.Attestation.Data)
+		payloadB64 := base64.StdEncoding.EncodeToString(entry.Attestation.Data)
 		log.Debugf("Base64-encoded payload length: %d", len(payloadB64))
-	} else if payload, ok := envelopeData["payload"].(string); ok && payload != "" {
-		// Fallback to content.envelope.payload
-		log.Debugf("Using payload from envelope.payload (length: %d)", len(payload))
-		// Check if the payload is already base64-encoded
-		if _, err := base64.StdEncoding.DecodeString(payload); err == nil {
-			// Already base64-encoded
-			payloadB64 = payload
-		} else {
-			// Not base64-encoded, encode it
-			payloadB64 = base64.StdEncoding.EncodeToString([]byte(payload))
-		}
-	} else {
-		return nil, fmt.Errorf("no payload found in attestation data or envelope")
+		return payloadB64, nil
 	}
 
+	payload, ok := envelopeData["payload"].(string)
+	if !ok || payload == "" {
+		return "", fmt.Errorf("no payload found in attestation data or envelope")
+	}
+
+	// Fallback to content.envelope.payload
+	log.Debugf("Using payload from envelope.payload (length: %d)", len(payload))
+	// Check if the payload is already base64-encoded
+	if _, err := base64.StdEncoding.DecodeString(payload); err == nil {
+		// Already base64-encoded
+		return payload, nil
+	}
+
+	// Not base64-encoded, encode it
+	return base64.StdEncoding.EncodeToString([]byte(payload)), nil
+}
+
+// debugPayload logs debug information about the payload
+func (r *RekorVSARetriever) debugPayload(payloadB64 string) {
 	// Debug: Try to decode the payload to see if it's valid base64
 	if _, err := base64.StdEncoding.DecodeString(payloadB64); err != nil {
-		log.Debugf("Payload is not valid base64: %v", err)
-		previewLen := 100
-		if len(payloadB64) < previewLen {
-			previewLen = len(payloadB64)
-		}
-		log.Debugf("Payload preview (first %d chars): %s", previewLen, payloadB64[:previewLen])
-
-		// Try URL encoding as well
-		if _, err := base64.URLEncoding.DecodeString(payloadB64); err != nil {
-			log.Debugf("Payload is also not valid URL base64: %v", err)
-		} else {
-			log.Debugf("Payload is valid URL base64")
-		}
-	} else {
-		log.Debugf("Payload is valid base64")
-		// Decode and preview the decoded content
-		decoded, _ := base64.StdEncoding.DecodeString(payloadB64)
-		previewLen := 100
-		if len(decoded) < previewLen {
-			previewLen = len(decoded)
-		}
-		log.Debugf("Decoded payload preview (first %d chars): %s", previewLen, string(decoded[:previewLen]))
+		r.debugInvalidBase64(payloadB64)
+		return
 	}
 
-	// Extract and convert signatures
+	r.debugValidBase64(payloadB64)
+}
+
+// debugInvalidBase64 logs debug information for invalid base64 payload
+func (r *RekorVSARetriever) debugInvalidBase64(payloadB64 string) {
+	_, err := base64.StdEncoding.DecodeString(payloadB64)
+	log.Debugf("Payload is not valid base64: %v", err)
+	previewLen := r.calculatePreviewLength(payloadB64)
+	log.Debugf("Payload preview (first %d chars): %s", previewLen, payloadB64[:previewLen])
+
+	// Try URL encoding as well
+	if _, err := base64.URLEncoding.DecodeString(payloadB64); err != nil {
+		log.Debugf("Payload is also not valid URL base64: %v", err)
+	} else {
+		log.Debugf("Payload is valid URL base64")
+	}
+}
+
+// debugValidBase64 logs debug information for valid base64 payload
+func (r *RekorVSARetriever) debugValidBase64(payloadB64 string) {
+	log.Debugf("Payload is valid base64")
+	// Decode and preview the decoded content
+	decoded, _ := base64.StdEncoding.DecodeString(payloadB64)
+	previewLen := r.calculatePreviewLength(string(decoded))
+	log.Debugf("Decoded payload preview (first %d chars): %s", previewLen, string(decoded[:previewLen]))
+}
+
+// calculatePreviewLength calculates the preview length for logging
+func (r *RekorVSARetriever) calculatePreviewLength(data string) int {
+	previewLen := 100
+	if len(data) < previewLen {
+		previewLen = len(data)
+	}
+	return previewLen
+}
+
+// extractSignatures extracts and converts signatures from the envelope data
+func (r *RekorVSARetriever) extractSignatures(envelopeData map[string]interface{}) ([]ssldsse.Signature, error) {
 	signaturesInterface, ok := envelopeData["signatures"].([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("envelope does not contain signatures")
@@ -428,59 +554,10 @@ func (r *RekorVSARetriever) buildDSSEEnvelopeFromIntotoV002(entry models.LogEntr
 
 	var signatures []ssldsse.Signature
 	for i, sigInterface := range signaturesInterface {
-		sigMap, ok := sigInterface.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("signature %d is not a valid object", i)
+		sig, err := r.convertSignature(sigInterface, i)
+		if err != nil {
+			return nil, err
 		}
-
-		sig := ssldsse.Signature{}
-
-		// Extract sig field (required) - only support standard field
-		if sigHex, ok := sigMap["sig"].(string); ok {
-			// Handle both single and double encoding to be robust
-			// Try single decode first
-			firstDecode, err := base64.StdEncoding.DecodeString(sigHex)
-			if err != nil {
-				return nil, fmt.Errorf("failed to decode signature %d: %w", i, err)
-			}
-
-			// TODO: This is a hack to get the signature from the in-toto entry
-			// Check if the result is still base64-encoded (indicating double encoding)
-			// This is usually the case when the signature is stored in the in-toto entry
-			// For some reason it's double encoded and it doesn't work to not encode when storing.
-			// So, we need to decode it twice to get the actual ASN.1 DER signature
-			// Then re-encode it once for the DSSE library
-			decodedString := string(firstDecode)
-			if isBase64String(decodedString) {
-				// Double-encoded: decode again
-				paddingNeeded := (4 - len(decodedString)%4) % 4
-				paddedString := decodedString
-				for j := 0; j < paddingNeeded; j++ {
-					paddedString += "="
-				}
-
-				actualSignature, err := base64.StdEncoding.DecodeString(paddedString)
-				if err != nil {
-					return nil, fmt.Errorf("failed to double-decode signature %d: %w", i, err)
-				}
-				sig.Sig = base64.StdEncoding.EncodeToString(actualSignature)
-			} else {
-				// Single-encoded: use as-is
-				sig.Sig = base64.StdEncoding.EncodeToString(firstDecode)
-			}
-		} else {
-			return nil, fmt.Errorf("signature %d missing required 'sig' field", i)
-		}
-
-		// Extract keyid field (optional)
-		if keyid, ok := sigMap["keyid"].(string); ok {
-			sig.KeyID = keyid
-		} else {
-			// If no KeyID is provided, set a default one to help with verification
-			// This might help the DSSE library match the signature to the public key
-			sig.KeyID = "default"
-		}
-
 		signatures = append(signatures, sig)
 	}
 
@@ -489,14 +566,75 @@ func (r *RekorVSARetriever) buildDSSEEnvelopeFromIntotoV002(entry models.LogEntr
 		return nil, fmt.Errorf("no valid signatures found in envelope")
 	}
 
-	// Build the ssldsse.Envelope
-	envelope := &ssldsse.Envelope{
-		PayloadType: payloadType,
-		Payload:     payloadB64,
-		Signatures:  signatures,
+	return signatures, nil
+}
+
+// convertSignature converts a signature interface to ssldsse.Signature
+func (r *RekorVSARetriever) convertSignature(sigInterface interface{}, index int) (ssldsse.Signature, error) {
+	sigMap, ok := sigInterface.(map[string]interface{})
+	if !ok {
+		return ssldsse.Signature{}, fmt.Errorf("signature %d is not a valid object", index)
 	}
 
-	return envelope, nil
+	sig := ssldsse.Signature{}
+
+	// Extract sig field (required) - only support standard field
+	sigHex, ok := sigMap["sig"].(string)
+	if !ok {
+		return ssldsse.Signature{}, fmt.Errorf("signature %d missing required 'sig' field", index)
+	}
+
+	// Handle both single and double encoding to be robust
+	encodedSig, err := r.processSignatureEncoding(sigHex)
+	if err != nil {
+		return ssldsse.Signature{}, fmt.Errorf("failed to process signature %d: %w", index, err)
+	}
+	sig.Sig = encodedSig
+
+	// Extract keyid field (optional)
+	if keyid, ok := sigMap["keyid"].(string); ok {
+		sig.KeyID = keyid
+	} else {
+		// If no KeyID is provided, set a default one to help with verification
+		// This might help the DSSE library match the signature to the public key
+		sig.KeyID = "default"
+	}
+
+	return sig, nil
+}
+
+// processSignatureEncoding handles the signature encoding logic
+func (r *RekorVSARetriever) processSignatureEncoding(sigHex string) (string, error) {
+	// Try single decode first
+	firstDecode, err := base64.StdEncoding.DecodeString(sigHex)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode signature: %w", err)
+	}
+
+	// TODO: This is a hack to get the signature from the in-toto entry
+	// Check if the result is still base64-encoded (indicating double encoding)
+	// This is usually the case when the signature is stored in the in-toto entry
+	// For some reason it's double encoded and it doesn't work to not encode when storing.
+	// So, we need to decode it twice to get the actual ASN.1 DER signature
+	// Then re-encode it once for the DSSE library
+	decodedString := string(firstDecode)
+	if isBase64String(decodedString) {
+		// Double-encoded: decode again
+		paddingNeeded := (4 - len(decodedString)%4) % 4
+		paddedString := decodedString
+		for j := 0; j < paddingNeeded; j++ {
+			paddedString += "="
+		}
+
+		actualSignature, err := base64.StdEncoding.DecodeString(paddedString)
+		if err != nil {
+			return "", fmt.Errorf("failed to double-decode signature: %w", err)
+		}
+		return base64.StdEncoding.EncodeToString(actualSignature), nil
+	}
+
+	// Single-encoded: use as-is
+	return base64.StdEncoding.EncodeToString(firstDecode), nil
 }
 
 // rekorClient wraps the actual Rekor client to implement our interface
@@ -539,68 +677,25 @@ func (rc *rekorClient) fetchLogEntriesParallel(ctx context.Context, uuids []stri
 		return nil, nil
 	}
 
-	// Get worker count from environment variable, default to 8
+	// Setup worker pool
 	workerCount := rc.getWorkerCount()
-
-	// For small numbers of UUIDs, use fewer workers to avoid overhead
 	if len(uuids) < workerCount {
 		workerCount = len(uuids)
 	}
 
 	log.Debugf("Fetching %d log entries using %d workers", len(uuids), workerCount)
 
-	// Create channels for coordination
-	uuidChan := make(chan string, len(uuids))
-	resultChan := make(chan fetchResult, len(uuids))
-	errorChan := make(chan error, 1)
-
-	// Start worker goroutines
-	var wg sync.WaitGroup
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			rc.worker(ctx, uuidChan, resultChan, workerID)
-		}(i)
-	}
+	// Create channels and start workers
+	uuidChan, resultChan := rc.setupWorkers(ctx, workerCount)
 
 	// Send UUIDs to workers
-	go func() {
-		defer close(uuidChan)
-		for _, uuid := range uuids {
-			select {
-			case uuidChan <- uuid:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	rc.sendUUIDs(ctx, uuids, uuidChan)
 
-	// Collect results in a separate goroutine
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
+	// Collect results
+	entries, fetchErrors := rc.collectResults(resultChan)
 
-	// Collect results and handle errors
-	var entries []models.LogEntryAnon
-	var fetchErrors []error
-
-	// Collect all results
-	for result := range resultChan {
-		if result.err != nil {
-			fetchErrors = append(fetchErrors, result.err)
-			continue
-		}
-		if result.entry != nil {
-			entries = append(entries, *result.entry)
-		}
-	}
-
-	// Check for context cancellation or worker errors
+	// Check for context cancellation
 	select {
-	case err := <-errorChan:
-		return nil, fmt.Errorf("worker error: %w", err)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
@@ -614,6 +709,62 @@ func (rc *rekorClient) fetchLogEntriesParallel(ctx context.Context, uuids []stri
 	}
 
 	return entries, nil
+}
+
+// setupWorkers creates channels and starts worker goroutines
+func (rc *rekorClient) setupWorkers(ctx context.Context, workerCount int) (chan string, chan fetchResult) {
+	uuidChan := make(chan string, workerCount*2)
+	resultChan := make(chan fetchResult, workerCount*2)
+
+	// Start worker goroutines
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			rc.worker(ctx, uuidChan, resultChan, workerID)
+		}(i)
+	}
+
+	// Close result channel when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	return uuidChan, resultChan
+}
+
+// sendUUIDs sends UUIDs to workers
+func (rc *rekorClient) sendUUIDs(ctx context.Context, uuids []string, uuidChan chan string) {
+	go func() {
+		defer close(uuidChan)
+		for _, uuid := range uuids {
+			select {
+			case uuidChan <- uuid:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// collectResults collects results from workers
+func (rc *rekorClient) collectResults(resultChan chan fetchResult) ([]models.LogEntryAnon, []error) {
+	var entries []models.LogEntryAnon
+	var fetchErrors []error
+
+	for result := range resultChan {
+		if result.err != nil {
+			fetchErrors = append(fetchErrors, result.err)
+			continue
+		}
+		if result.entry != nil {
+			entries = append(entries, *result.entry)
+		}
+	}
+
+	return entries, fetchErrors
 }
 
 // fetchResult represents the result of a single UUID fetch operation

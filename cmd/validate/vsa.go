@@ -70,7 +70,7 @@ type validateVSAData struct {
 
 	// Internal state
 	policySpec ecapi.EnterpriseContractPolicySpec
-	retriever  vsa.VSARetriever
+	retriever  vsa.Retriever
 }
 
 func NewValidateVSACmd() *cobra.Command {
@@ -200,10 +200,9 @@ func runValidateVSA(cmd *cobra.Command, data *validateVSAData, args []string) er
 	// Images is a snapshot
 	if data.images != "" {
 		return validateSnapshotVSAs(ctx, data)
-	} else {
-		// VSA identifier is a single VSA, usually from a file system
-		return validateSingleVSA(ctx, data, args)
 	}
+	// VSA identifier is a single VSA, usually from a file system
+	return validateSingleVSA(ctx, data, args)
 }
 
 // validateVSAInput validates the command input using Cobra's validation patterns
@@ -355,74 +354,17 @@ func validateSnapshotVSAs(ctx context.Context, data *validateVSAData) error {
 	}
 	close(jobs)
 
-	// Collect results
-	var allResults []vsa.ComponentResult
-	var allErrors error
-	var successCount, failureCount int
-
-	for i := 0; i < numComponents; i++ {
-		result := <-results
-		allResults = append(allResults, result)
-
-		if result.Error != nil {
-			failureCount++
-			allErrors = errors.Join(allErrors, result.Error)
-		} else if result.Result != nil && result.Result.Passed {
-			successCount++
-		} else if result.Result != nil && !result.Result.Passed {
-			failureCount++
-		}
-	}
-	close(results)
-
-	// Sort results by component name for consistent display
-	sort.Slice(allResults, func(i, j int) bool {
-		return allResults[i].ComponentName < allResults[j].ComponentName
-	})
+	// Collect and process results
+	allResults, successCount, failureCount, allErrors := collectAndProcessResults(results, numComponents)
 
 	// Display results
-	fmt.Printf("\n=== Component Validation Results ===\n")
-	for _, result := range allResults {
-		fmt.Printf("\nComponent: %s\n", result.ComponentName)
-		fmt.Printf("  Image: %s\n", result.ImageRef)
-
-		if result.Error != nil {
-			fmt.Printf("  ❌ Failed: %v\n", result.Error)
-		} else if result.Result != nil && result.Result.Passed {
-			fmt.Printf("  ✅ Passed: %s\n", result.Result.Message)
-			if result.Result.SignatureVerified {
-				fmt.Println("   🔐 Signature verified")
-			} else if !data.ignoreSignatureVerification {
-				fmt.Println("   ⚠️  Signature verification requested but not performed")
-			}
-		} else if result.Result != nil && !result.Result.Passed {
-			if result.Result.SignatureVerified {
-				fmt.Println("  🔐 Signature verified")
-			} else if !data.ignoreSignatureVerification {
-				fmt.Println("  ⚠️  Signature verification requested but not performed")
-			}
-			fmt.Printf("  ❌ Failed: %s\n", result.Result.Message)
-		}
-	}
+	displayValidationResults(allResults, data)
 
 	// Print summary
-	fmt.Printf("\n=== Snapshot Validation Summary ===\n")
-	fmt.Printf("Total components: %d\n", len(allResults))
-	fmt.Printf("Successful: %d\n", successCount)
-	fmt.Printf("Failed: %d\n", failureCount)
+	printValidationSummary(allResults, successCount, failureCount)
 
-	// TODO: Add proper output formatting support for VSA validation
-	// For now, output formatting is not implemented for VSA validation
-	// The parallel processing functionality is the main focus
-
-	if failureCount > 0 && data.strict {
-		if allErrors != nil {
-			return fmt.Errorf("snapshot validation failed for %d components: %w", failureCount, allErrors)
-		}
-		return fmt.Errorf("snapshot validation failed for %d components", failureCount)
-	}
-
-	return allErrors
+	// Check for failures in strict mode
+	return checkValidationFailures(failureCount, allErrors, data.strict)
 }
 
 // processSnapshotComponent processes a single snapshot component
@@ -461,4 +403,89 @@ func processSnapshotComponent(ctx context.Context, component app.SnapshotCompone
 		Result:        result,
 		Error:         nil,
 	}
+}
+
+// collectAndProcessResults collects results from workers and processes them
+func collectAndProcessResults(results chan vsa.ComponentResult, numComponents int) ([]vsa.ComponentResult, int, int, error) {
+	var allResults []vsa.ComponentResult
+	var allErrors error
+	var successCount, failureCount int
+
+	for i := 0; i < numComponents; i++ {
+		result := <-results
+		allResults = append(allResults, result)
+
+		if result.Error != nil {
+			failureCount++
+			allErrors = errors.Join(allErrors, result.Error)
+		} else if result.Result != nil && result.Result.Passed {
+			successCount++
+		} else if result.Result != nil && !result.Result.Passed {
+			failureCount++
+		}
+	}
+	close(results)
+
+	// Sort results by component name for consistent display
+	sort.Slice(allResults, func(i, j int) bool {
+		return allResults[i].ComponentName < allResults[j].ComponentName
+	})
+
+	return allResults, successCount, failureCount, allErrors
+}
+
+// displayValidationResults displays the validation results for each component
+func displayValidationResults(allResults []vsa.ComponentResult, data *validateVSAData) {
+	fmt.Printf("\n=== Component Validation Results ===\n")
+	for _, result := range allResults {
+		fmt.Printf("\nComponent: %s\n", result.ComponentName)
+		fmt.Printf("  Image: %s\n", result.ImageRef)
+
+		if result.Error != nil {
+			fmt.Printf("  ❌ Failed: %v\n", result.Error)
+		} else if result.Result != nil && result.Result.Passed {
+			fmt.Printf("  ✅ Passed: %s\n", result.Result.Message)
+			displaySignatureStatus(result.Result.SignatureVerified, data.ignoreSignatureVerification, true)
+		} else if result.Result != nil && !result.Result.Passed {
+			displaySignatureStatus(result.Result.SignatureVerified, data.ignoreSignatureVerification, false)
+			fmt.Printf("  ❌ Failed: %s\n", result.Result.Message)
+		}
+	}
+}
+
+// displaySignatureStatus displays signature verification status
+func displaySignatureStatus(signatureVerified, ignoreSignatureVerification, passed bool) {
+	if signatureVerified {
+		if passed {
+			fmt.Println("   🔐 Signature verified")
+		} else {
+			fmt.Println("  🔐 Signature verified")
+		}
+	} else if !ignoreSignatureVerification {
+		if passed {
+			fmt.Println("   ⚠️  Signature verification requested but not performed")
+		} else {
+			fmt.Println("  ⚠️  Signature verification requested but not performed")
+		}
+	}
+}
+
+// printValidationSummary prints the validation summary
+func printValidationSummary(allResults []vsa.ComponentResult, successCount, failureCount int) {
+	fmt.Printf("\n=== Snapshot Validation Summary ===\n")
+	fmt.Printf("Total components: %d\n", len(allResults))
+	fmt.Printf("Successful: %d\n", successCount)
+	fmt.Printf("Failed: %d\n", failureCount)
+}
+
+// checkValidationFailures checks for failures in strict mode
+func checkValidationFailures(failureCount int, allErrors error, strict bool) error {
+	if failureCount > 0 && strict {
+		if allErrors != nil {
+			return fmt.Errorf("snapshot validation failed for %d components: %w", failureCount, allErrors)
+		}
+		return fmt.Errorf("snapshot validation failed for %d components", failureCount)
+	}
+
+	return allErrors
 }

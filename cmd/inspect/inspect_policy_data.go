@@ -150,10 +150,9 @@ func inspectPolicyDataCmd() *cobra.Command {
 				fmt.Fprintln(out, string(yamlOutput))
 				return nil
 
-			} else {
-				// Default to json
-				return json.NewEncoder(out).Encode(allData)
 			}
+			// Default to json
+			return json.NewEncoder(out).Encode(allData)
 		},
 	}
 

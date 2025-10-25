@@ -29,7 +29,7 @@ import (
 
 type policyValidationFunc func(context.Context, string) error
 
-func ValidatePolicyCmd(validate policyValidationFunc) *cobra.Command {
+func PolicyCmd(validate policyValidationFunc) *cobra.Command {
 	data := struct {
 		policyConfiguration string
 		output              []string

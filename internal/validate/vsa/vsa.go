@@ -366,11 +366,11 @@ type VSALookupResult struct {
 
 // VSAChecker handles checking for existing VSAs using any VSARetriever
 type VSAChecker struct {
-	retriever VSARetriever
+	retriever Retriever
 }
 
-// NewVSAChecker creates a new VSA checker with a VSARetriever
-func NewVSAChecker(retriever VSARetriever) *VSAChecker {
+// NewVSAChecker creates a new VSA checker with a Retriever
+func NewVSAChecker(retriever Retriever) *VSAChecker {
 	return &VSAChecker{
 		retriever: retriever,
 	}
@@ -536,7 +536,7 @@ func CreateVSACheckerFromUploadFlags(vsaUpload []string) *VSAChecker {
 
 // CreateRetrieverFromUploadFlags creates a VSA retriever based on upload flags
 // Currently supports Rekor, but can be extended for other retrievers
-func CreateRetrieverFromUploadFlags(vsaUpload []string) VSARetriever {
+func CreateRetrieverFromUploadFlags(vsaUpload []string) Retriever {
 	for _, uploadFlag := range vsaUpload {
 		config, err := ParseStorageFlag(uploadFlag)
 		if err != nil {

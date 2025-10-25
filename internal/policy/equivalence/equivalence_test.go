@@ -27,9 +27,34 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
+// createTestSpec creates a test EnterpriseContractPolicySpec with the given configuration
+func createTestSpec(include, exclude []string) ecc.EnterpriseContractPolicySpec {
+	return ecc.EnterpriseContractPolicySpec{
+		Sources: []ecc.Source{
+			{
+				Config: &ecc.SourceConfig{
+					Include: include,
+					Exclude: exclude,
+				},
+			},
+		},
+	}
+}
+
+// createTestSpecWithRuleData creates a test EnterpriseContractPolicySpec with RuleData
+func createTestSpecWithRuleData(ruleData string) ecc.EnterpriseContractPolicySpec {
+	return ecc.EnterpriseContractPolicySpec{
+		Sources: []ecc.Source{
+			{
+				RuleData: &extv1.JSON{Raw: []byte(ruleData)},
+			},
+		},
+	}
+}
+
 func TestEquivalenceChecker_AreEquivalent(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -120,69 +145,21 @@ func TestEquivalenceChecker_AreEquivalent(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "different include matchers",
-			spec1: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						Config: &ecc.SourceConfig{
-							Include: []string{"@redhat"},
-						},
-					},
-				},
-			},
-			spec2: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						Config: &ecc.SourceConfig{
-							Include: []string{"@slsa3"},
-						},
-					},
-				},
-			},
+			name:     "different include matchers",
+			spec1:    createTestSpec([]string{"@redhat"}, nil),
+			spec2:    createTestSpec([]string{"@slsa3"}, nil),
 			expected: false,
 		},
 		{
-			name: "different exclude matchers",
-			spec1: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						Config: &ecc.SourceConfig{
-							Exclude: []string{"cve"},
-						},
-					},
-				},
-			},
-			spec2: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						Config: &ecc.SourceConfig{
-							Exclude: []string{"hermetic"},
-						},
-					},
-				},
-			},
+			name:     "different exclude matchers",
+			spec1:    createTestSpec(nil, []string{"cve"}),
+			spec2:    createTestSpec(nil, []string{"hermetic"}),
 			expected: false,
 		},
 		{
-			name: "matcher normalization - pkg.* to pkg",
-			spec1: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						Config: &ecc.SourceConfig{
-							Include: []string{"cve.*"},
-						},
-					},
-				},
-			},
-			spec2: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						Config: &ecc.SourceConfig{
-							Include: []string{"cve"},
-						},
-					},
-				},
-			},
+			name:     "matcher normalization - pkg.* to pkg",
+			spec1:    createTestSpec([]string{"cve.*"}, nil),
+			spec2:    createTestSpec([]string{"cve"}, nil),
 			expected: true,
 		},
 		{
@@ -275,21 +252,9 @@ func TestEquivalenceChecker_AreEquivalent(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "identical RuleData with different key order",
-			spec1: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						RuleData: &extv1.JSON{Raw: []byte(`{"allowed_registry_prefixes":["registry.redhat.io/","registry.access.redhat.com/"],"other_setting":"value"}`)},
-					},
-				},
-			},
-			spec2: ecc.EnterpriseContractPolicySpec{
-				Sources: []ecc.Source{
-					{
-						RuleData: &extv1.JSON{Raw: []byte(`{"other_setting":"value","allowed_registry_prefixes":["registry.redhat.io/","registry.access.redhat.com/"]}`)},
-					},
-				},
-			},
+			name:     "identical RuleData with different key order",
+			spec1:    createTestSpecWithRuleData(`{"allowed_registry_prefixes":["registry.redhat.io/","registry.access.redhat.com/"],"other_setting":"value"}`),
+			spec2:    createTestSpecWithRuleData(`{"other_setting":"value","allowed_registry_prefixes":["registry.redhat.io/","registry.access.redhat.com/"]}`),
 			expected: true,
 		},
 		{
@@ -332,7 +297,7 @@ func TestEquivalenceChecker_AreEquivalent(t *testing.T) {
 
 func TestEquivalenceChecker_VolatileConfig(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -449,7 +414,7 @@ func TestEquivalenceChecker_ImageMatching(t *testing.T) {
 		Ref:    "registry.redhat.io/ubi8/ubi:latest",
 		URL:    "registry.redhat.io/ubi8/ubi@sha256:abc123",
 	}
-	checker := NewEquivalenceChecker(effectiveTime, imageInfo)
+	checker := NewChecker(effectiveTime, imageInfo)
 
 	tests := []struct {
 		name     string
@@ -560,7 +525,7 @@ func TestEquivalenceChecker_ImageMatching(t *testing.T) {
 
 func TestEquivalenceChecker_RealWorldExamples(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	// Test case based on ecps/example.yaml and ecps/ec-policy.yaml
 	t.Run("example vs ec-policy", func(t *testing.T) {
@@ -666,7 +631,7 @@ func TestEquivalenceChecker_RealWorldExamples(t *testing.T) {
 
 func TestEquivalenceChecker_DigestStripping(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -793,7 +758,7 @@ func TestEquivalenceChecker_DigestStripping(t *testing.T) {
 
 func TestEquivalenceChecker_ProtocolNormalization(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -1055,7 +1020,7 @@ func TestEquivalenceChecker_ProtocolNormalization(t *testing.T) {
 func TestDeterministicHashing(t *testing.T) {
 	// Test that equivalent data structures with different key orders produce the same hash
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	// Create two equivalent maps with different key orders
 	data1 := map[string]interface{}{
@@ -1126,7 +1091,7 @@ func TestDeterministicHashing(t *testing.T) {
 func TestDeterministicMergeOrder(t *testing.T) {
 	// Test that equivalent specs with different source orders produce identical merged results
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	// Create two equivalent specs with different source orders
 	spec1 := ecc.EnterpriseContractPolicySpec{
@@ -1187,7 +1152,7 @@ func TestDeterministicMergeOrder(t *testing.T) {
 func TestDeterministicMergeOrderDebug(t *testing.T) {
 	// Debug test to understand the merge behavior
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	// Create test data
 	source1 := ecc.Source{
@@ -1221,7 +1186,7 @@ func TestDeterministicMergeOrderDebug(t *testing.T) {
 
 func TestAreEquivalentWithDifferences(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name          string
@@ -1414,7 +1379,7 @@ func TestPolicyDifference(t *testing.T) {
 
 func TestGenerateUnifiedDiffOutput(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name        string
@@ -1521,7 +1486,7 @@ func TestGenerateUnifiedDiffOutput(t *testing.T) {
 
 func TestBucketSimilarity(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -1642,7 +1607,7 @@ func TestJaccardSimilarity(t *testing.T) {
 
 func TestUnifiedJSONDiff(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -1699,7 +1664,7 @@ func TestUnifiedJSONDiff(t *testing.T) {
 
 func TestNormalizePolicy(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	tests := []struct {
 		name     string
@@ -1781,7 +1746,7 @@ func TestNormalizePolicy(t *testing.T) {
 
 func TestEdgeCases(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	t.Run("empty policy specs", func(t *testing.T) {
 		spec1 := ecc.EnterpriseContractPolicySpec{}
@@ -1851,7 +1816,7 @@ func TestEdgeCases(t *testing.T) {
 
 func TestPerformance(t *testing.T) {
 	effectiveTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	checker := NewEquivalenceChecker(effectiveTime, nil)
+	checker := NewChecker(effectiveTime, nil)
 
 	// Create a large policy spec with many sources
 	largeSpec := ecc.EnterpriseContractPolicySpec{
@@ -1902,7 +1867,7 @@ func TestVolatileConfigWithImageInfo(t *testing.T) {
 		Ref:    "registry.redhat.io/ubi8/ubi:latest",
 		URL:    "registry.redhat.io/ubi8/ubi@sha256:abc123",
 	}
-	checker := NewEquivalenceChecker(effectiveTime, imageInfo)
+	checker := NewChecker(effectiveTime, imageInfo)
 
 	tests := []struct {
 		name     string

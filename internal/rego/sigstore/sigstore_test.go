@@ -41,6 +41,23 @@ import (
 	"github.com/conforma/cli/internal/utils/oci/fake"
 )
 
+// createTestOptsVerifier creates a test opts verifier function
+func createTestOptsVerifier(t *testing.T, issuer, subject string, useRegex bool) func(mock.Arguments) {
+	return func(args mock.Arguments) {
+		checkOpts := args.Get(1).(*cosign.CheckOpts)
+		require.NotNil(t, checkOpts)
+		require.False(t, checkOpts.IgnoreTlog)
+		require.NotNil(t, checkOpts.RekorClient)
+		if useRegex {
+			identities := []cosign.Identity{{IssuerRegExp: issuer, SubjectRegExp: subject}}
+			require.Equal(t, checkOpts.Identities, identities)
+		} else {
+			identities := []cosign.Identity{{Issuer: issuer, Subject: subject}}
+			require.Equal(t, checkOpts.Identities, identities)
+		}
+	}
+}
+
 func TestSigstoreVerifyImage(t *testing.T) {
 	goodImage := name.MustParseReference(
 		"registry.local/spam@sha256:4e388ab32b10dc8dbc7e28144f552830adc74787c1e2c0824032078a79f227fb",
@@ -93,14 +110,7 @@ func TestSigstoreVerifyImage(t *testing.T) {
 				certificateOIDCIssuer: "issuer",
 				rekorURL:              "https://rekor.local",
 			},
-			optsVerifier: func(args mock.Arguments) {
-				checkOpts := args.Get(1).(*cosign.CheckOpts)
-				require.NotNil(t, checkOpts)
-				require.False(t, checkOpts.IgnoreTlog)
-				require.NotNil(t, checkOpts.RekorClient)
-				identities := []cosign.Identity{{Issuer: "issuer", Subject: "subject"}}
-				require.Equal(t, checkOpts.Identities, identities)
-			},
+			optsVerifier: createTestOptsVerifier(t, "issuer", "subject", false),
 		},
 		{
 			name:    "long lived key with rekor public key",
@@ -127,14 +137,7 @@ func TestSigstoreVerifyImage(t *testing.T) {
 				certificateOIDCIssuerRegExp: `issuer.*`,
 				rekorURL:                    "https://rekor.local",
 			},
-			optsVerifier: func(args mock.Arguments) {
-				checkOpts := args.Get(1).(*cosign.CheckOpts)
-				require.NotNil(t, checkOpts)
-				require.False(t, checkOpts.IgnoreTlog)
-				require.NotNil(t, checkOpts.RekorClient)
-				identities := []cosign.Identity{{IssuerRegExp: `issuer.*`, SubjectRegExp: `subject.*`}}
-				require.Equal(t, checkOpts.Identities, identities)
-			},
+			optsVerifier: createTestOptsVerifier(t, `issuer.*`, `subject.*`, true),
 		},
 		{
 			name:    "bad public key",

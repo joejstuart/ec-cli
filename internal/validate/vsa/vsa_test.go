@@ -364,7 +364,7 @@ func TestIsVSAExpired(t *testing.T) {
 	}
 }
 
-// mockVSARetriever is a mock implementation of VSARetriever for testing
+// mockVSARetriever is a mock implementation of Retriever for testing
 type mockVSARetriever struct{}
 
 func (m *mockVSARetriever) RetrieveVSA(ctx context.Context, identifier string) (*ssldsse.Envelope, error) {
@@ -374,7 +374,7 @@ func (m *mockVSARetriever) RetrieveVSA(ctx context.Context, identifier string) (
 func TestNewVSAChecker(t *testing.T) {
 	tests := []struct {
 		name      string
-		retriever VSARetriever
+		retriever Retriever
 		expectNil bool
 	}{
 		{

@@ -34,7 +34,7 @@ func init() {
 func init() {
 	ValidateCmd.AddCommand(validateImageCmd(image.ValidateImage))
 	ValidateCmd.AddCommand(validateInputCmd(input.ValidateInput))
-	ValidateCmd.AddCommand(ValidatePolicyCmd(policy.ValidatePolicy))
+	ValidateCmd.AddCommand(PolicyCmd(policy.ValidatePolicy))
 	ValidateCmd.AddCommand(NewValidateVSACmd())
 }
 

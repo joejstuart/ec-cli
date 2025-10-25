@@ -36,6 +36,20 @@ import (
 	"github.com/conforma/cli/internal/utils"
 )
 
+// createTestDir creates a helper function for setting up test directories
+func createTestDir(fs afero.Fs) func(mock.Arguments) {
+	return func(args mock.Arguments) {
+		dir := args.String(0)
+
+		if err := fs.MkdirAll(dir, 0755); err != nil {
+			panic(err)
+		}
+		if err := afero.WriteFile(fs, fmt.Sprintf("%s/foo.rego", args.String(0)), []byte("package foo\n\nbar = 1"), 0644); err != nil {
+			panic(err)
+		}
+	}
+}
+
 type mockDownloader struct {
 	mock.Mock
 }
@@ -53,16 +67,7 @@ func TestFetchSourcesFromPolicy(t *testing.T) {
 	downloader := mockDownloader{}
 	ctx = context.WithValue(ctx, source.DownloaderFuncKey, &downloader)
 
-	createDir := func(args mock.Arguments) {
-		dir := args.String(0)
-
-		if err := fs.MkdirAll(dir, 0755); err != nil {
-			panic(err)
-		}
-		if err := afero.WriteFile(fs, fmt.Sprintf("%s/foo.rego", args.String(0)), []byte("package foo\n\nbar = 1"), 0644); err != nil {
-			panic(err)
-		}
-	}
+	createDir := createTestDir(fs)
 
 	downloader.On("Download", mock.Anything, "one", false).Return(&fileMetadata.FSMetadata{}, nil).Run(createDir)
 	downloader.On("Download", mock.Anything, "two", false).Return(&fileMetadata.FSMetadata{}, nil).Run(createDir)
@@ -95,16 +100,7 @@ func TestFetchSources(t *testing.T) {
 	downloader := mockDownloader{}
 	ctx = context.WithValue(ctx, source.DownloaderFuncKey, &downloader)
 
-	createDir := func(args mock.Arguments) {
-		dir := args.String(0)
-
-		if err := fs.MkdirAll(dir, 0755); err != nil {
-			panic(err)
-		}
-		if err := afero.WriteFile(fs, fmt.Sprintf("%s/foo.rego", args.String(0)), []byte("package foo\n\nbar = 1"), 0644); err != nil {
-			panic(err)
-		}
-	}
+	createDir := createTestDir(fs)
 
 	downloader.On("Download", mock.Anything, "one", false).Return(&fileMetadata.FSMetadata{}, nil).Run(createDir)
 	downloader.On("Download", mock.Anything, "two", false).Return(&fileMetadata.FSMetadata{}, nil).Run(createDir)

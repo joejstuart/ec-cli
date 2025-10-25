@@ -64,15 +64,15 @@ func (pd PolicyDifference) IsAdded() bool   { return pd.Kind == DiffAdded }
 func (pd PolicyDifference) IsRemoved() bool { return pd.Kind == DiffRemoved }
 func (pd PolicyDifference) IsChanged() bool { return pd.Kind == DiffChanged }
 
-// EquivalenceChecker determines whether two EnterpriseContractPolicy specs
+// Checker determines whether two EnterpriseContractPolicy specs
 // produce the same evaluation result for a given image at a specific time.
-type EquivalenceChecker struct {
+type Checker struct {
 	effectiveTime time.Time
 	imageInfo     *ImageInfo
 }
 
-func NewEquivalenceChecker(effectiveTime time.Time, imageInfo *ImageInfo) *EquivalenceChecker {
-	return &EquivalenceChecker{effectiveTime: effectiveTime, imageInfo: imageInfo}
+func NewChecker(effectiveTime time.Time, imageInfo *ImageInfo) *Checker {
+	return &Checker{effectiveTime: effectiveTime, imageInfo: imageInfo}
 }
 
 // PolicyBucket represents one normalized policy "source entry"
@@ -92,18 +92,18 @@ type NormalizedPolicy struct {
 }
 
 // AreEquivalent checks equivalence only
-func (ec *EquivalenceChecker) AreEquivalent(spec1, spec2 ecc.EnterpriseContractPolicySpec) (bool, error) {
+func (ec *Checker) AreEquivalent(spec1, spec2 ecc.EnterpriseContractPolicySpec) (bool, error) {
 	eq, _, err := ec.AreEquivalentWithDifferences(spec1, spec2)
 	return eq, err
 }
 
 // NormalizePolicy exposes normalization publicly
-func (ec *EquivalenceChecker) NormalizePolicy(spec ecc.EnterpriseContractPolicySpec) (*NormalizedPolicy, error) {
+func (ec *Checker) NormalizePolicy(spec ecc.EnterpriseContractPolicySpec) (*NormalizedPolicy, error) {
 	return ec.normalizePolicy(spec)
 }
 
 // AreEquivalentWithDifferences returns equivalence and structured diffs
-func (ec *EquivalenceChecker) AreEquivalentWithDifferences(spec1, spec2 ecc.EnterpriseContractPolicySpec) (bool, []PolicyDifference, error) {
+func (ec *Checker) AreEquivalentWithDifferences(spec1, spec2 ecc.EnterpriseContractPolicySpec) (bool, []PolicyDifference, error) {
 	norm1, err := ec.normalizePolicy(spec1)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to normalize first policy: %w", err)
@@ -121,7 +121,7 @@ func (ec *EquivalenceChecker) AreEquivalentWithDifferences(spec1, spec2 ecc.Ente
 
 // ---------- Normalization ----------
 
-func (ec *EquivalenceChecker) normalizePolicy(spec ecc.EnterpriseContractPolicySpec) (*NormalizedPolicy, error) {
+func (ec *Checker) normalizePolicy(spec ecc.EnterpriseContractPolicySpec) (*NormalizedPolicy, error) {
 	sources := ec.mergeGlobalConfig(spec)
 	buckets := ec.buildBuckets(sources)
 
@@ -137,7 +137,7 @@ func (ec *EquivalenceChecker) normalizePolicy(spec ecc.EnterpriseContractPolicyS
 }
 
 // merge deprecated spec.Configuration into each source entry
-func (ec *EquivalenceChecker) mergeGlobalConfig(spec ecc.EnterpriseContractPolicySpec) []ecc.Source {
+func (ec *Checker) mergeGlobalConfig(spec ecc.EnterpriseContractPolicySpec) []ecc.Source {
 	sources := make([]ecc.Source, len(spec.Sources))
 	copy(sources, spec.Sources)
 
@@ -158,7 +158,7 @@ func (ec *EquivalenceChecker) mergeGlobalConfig(spec ecc.EnterpriseContractPolic
 }
 
 // group sources by normalized (policy set, data set)
-func (ec *EquivalenceChecker) buildBuckets(sources []ecc.Source) map[string][]ecc.Source {
+func (ec *Checker) buildBuckets(sources []ecc.Source) map[string][]ecc.Source {
 	b := make(map[string][]ecc.Source)
 	for _, s := range sources {
 		policySet := ec.normalizeURISet(s.Policy)
@@ -169,7 +169,7 @@ func (ec *EquivalenceChecker) buildBuckets(sources []ecc.Source) map[string][]ec
 	return b
 }
 
-func (ec *EquivalenceChecker) normalizeURISet(uris []string) string {
+func (ec *Checker) normalizeURISet(uris []string) string {
 	set := map[string]struct{}{}
 	for _, u := range uris {
 		set[ec.normalizeURI(u)] = struct{}{}
@@ -189,7 +189,7 @@ var (
 )
 
 // strip protocol, query/fragment, and digest
-func (ec *EquivalenceChecker) normalizeURI(uri string) string {
+func (ec *Checker) normalizeURI(uri string) string {
 	s := strings.TrimSpace(uri)
 	// strip http(s):// if present
 	s = strings.TrimPrefix(s, "http://")
@@ -203,7 +203,7 @@ func (ec *EquivalenceChecker) normalizeURI(uri string) string {
 	return s
 }
 
-func (ec *EquivalenceChecker) normalizeBucket(sources []ecc.Source) (PolicyBucket, error) {
+func (ec *Checker) normalizeBucket(sources []ecc.Source) (PolicyBucket, error) {
 	if len(sources) == 0 {
 		return PolicyBucket{}, fmt.Errorf("empty source group")
 	}
@@ -239,7 +239,7 @@ func (ec *EquivalenceChecker) normalizeBucket(sources []ecc.Source) (PolicyBucke
 	}, nil
 }
 
-func (ec *EquivalenceChecker) mergeRuleData(sources []ecc.Source) (map[string]interface{}, error) {
+func (ec *Checker) mergeRuleData(sources []ecc.Source) (map[string]interface{}, error) {
 	type item struct {
 		key string
 		m   map[string]interface{}
@@ -275,7 +275,7 @@ func (ec *EquivalenceChecker) mergeRuleData(sources []ecc.Source) (map[string]in
 	return merged, nil
 }
 
-func (ec *EquivalenceChecker) mergeJSON(dst, src map[string]interface{}) error {
+func (ec *Checker) mergeJSON(dst, src map[string]interface{}) error {
 	for k, v := range src {
 		if ex, ok := dst[k]; ok {
 			dm, ok1 := ex.(map[string]interface{})
@@ -292,7 +292,7 @@ func (ec *EquivalenceChecker) mergeJSON(dst, src map[string]interface{}) error {
 	return nil
 }
 
-func (ec *EquivalenceChecker) mergeMatchers(sources []ecc.Source) ([]string, []string) {
+func (ec *Checker) mergeMatchers(sources []ecc.Source) ([]string, []string) {
 	var inc, exc []string
 	for _, s := range sources {
 		if s.Config != nil {
@@ -307,7 +307,7 @@ func (ec *EquivalenceChecker) mergeMatchers(sources []ecc.Source) ([]string, []s
 	return ec.normalizeMatchers(inc), ec.normalizeMatchers(exc)
 }
 
-func (ec *EquivalenceChecker) getActiveVolatileMatchers(v *ecc.VolatileSourceConfig) ([]string, []string) {
+func (ec *Checker) getActiveVolatileMatchers(v *ecc.VolatileSourceConfig) ([]string, []string) {
 	var inc, exc []string
 	for _, m := range v.Include {
 		if ec.isVolatileMatcherActive(m) {
@@ -322,7 +322,7 @@ func (ec *EquivalenceChecker) getActiveVolatileMatchers(v *ecc.VolatileSourceCon
 	return inc, exc
 }
 
-func (ec *EquivalenceChecker) isVolatileMatcherActive(m ecc.VolatileCriteria) bool {
+func (ec *Checker) isVolatileMatcherActive(m ecc.VolatileCriteria) bool {
 	if m.EffectiveOn != "" {
 		if t, err := time.Parse(time.RFC3339, m.EffectiveOn); err == nil && ec.effectiveTime.Before(t) {
 			return false
@@ -347,7 +347,7 @@ func (ec *EquivalenceChecker) isVolatileMatcherActive(m ecc.VolatileCriteria) bo
 	return true
 }
 
-func (ec *EquivalenceChecker) normalizeMatchers(ms []string) []string {
+func (ec *Checker) normalizeMatchers(ms []string) []string {
 	set := map[string]struct{}{}
 	for _, m := range ms {
 		m = strings.TrimSpace(m)
@@ -366,7 +366,7 @@ func (ec *EquivalenceChecker) normalizeMatchers(ms []string) []string {
 
 // ---------- Comparison + pairing + Git-style diff ----------
 
-func (ec *EquivalenceChecker) compareNormalizedPoliciesWithDifferences(norm1, norm2 *NormalizedPolicy) (bool, []PolicyDifference, error) {
+func (ec *Checker) compareNormalizedPoliciesWithDifferences(norm1, norm2 *NormalizedPolicy) (bool, []PolicyDifference, error) {
 	var diffs []PolicyDifference
 
 	// Index by exact key first
@@ -438,7 +438,7 @@ func (ec *EquivalenceChecker) compareNormalizedPoliciesWithDifferences(norm1, no
 // Pairing: greedy best-match by similarity to avoid noisy add/remove
 type bucketPair struct{ r, a PolicyBucket }
 
-func (ec *EquivalenceChecker) pairBuckets(removed, added []PolicyBucket) (pairs []bucketPair, remOut []PolicyBucket, addOut []PolicyBucket) {
+func (ec *Checker) pairBuckets(removed, added []PolicyBucket) (pairs []bucketPair, remOut []PolicyBucket, addOut []PolicyBucket) {
 	if len(removed) == 0 || len(added) == 0 {
 		return nil, removed, added
 	}
@@ -486,7 +486,7 @@ func (ec *EquivalenceChecker) pairBuckets(removed, added []PolicyBucket) (pairs 
 	return
 }
 
-func (ec *EquivalenceChecker) bucketSimilarity(a, b PolicyBucket) float64 {
+func (ec *Checker) bucketSimilarity(a, b PolicyBucket) float64 {
 	// Jaccard similarities for lists
 	pol := jaccard(a.PolicyURIs, b.PolicyURIs)
 	dat := jaccard(a.DataURIs, b.DataURIs)
@@ -542,7 +542,7 @@ func overlap(a, b []string) bool {
 	return false
 }
 
-func (ec *EquivalenceChecker) compareBucketsWithDifferences(b1, b2 PolicyBucket) []PolicyDifference {
+func (ec *Checker) compareBucketsWithDifferences(b1, b2 PolicyBucket) []PolicyDifference {
 	var diffs []PolicyDifference
 	key := ec.bucketKey(b1)
 
@@ -674,7 +674,7 @@ func (ec *EquivalenceChecker) compareBucketsWithDifferences(b1, b2 PolicyBucket)
 	return diffs
 }
 
-func (ec *EquivalenceChecker) describeSource(b PolicyBucket) string {
+func (ec *Checker) describeSource(b PolicyBucket) string {
 	switch {
 	case len(b.PolicyURIs) > 0 && len(b.DataURIs) > 0:
 		return fmt.Sprintf("Policy sources:\n%s\nData sources:\n%s", ec.formatURIs(b.PolicyURIs), ec.formatURIs(b.DataURIs))
@@ -689,11 +689,11 @@ func (ec *EquivalenceChecker) describeSource(b PolicyBucket) string {
 
 // ---------- Rendering: Git-style unified output ----------
 
-func (ec *EquivalenceChecker) GenerateUnifiedDiffOutput(differences []PolicyDifference) string {
+func (ec *Checker) GenerateUnifiedDiffOutput(differences []PolicyDifference) string {
 	return ec.GenerateUnifiedDiffOutputWithLabels(differences, "VSA", "Supplied")
 }
 
-func (ec *EquivalenceChecker) GenerateUnifiedDiffOutputWithLabels(differences []PolicyDifference, fromLabel, toLabel string) string {
+func (ec *Checker) GenerateUnifiedDiffOutputWithLabels(differences []PolicyDifference, fromLabel, toLabel string) string {
 	if len(differences) == 0 {
 		return ""
 	}
@@ -749,7 +749,7 @@ func (ec *EquivalenceChecker) GenerateUnifiedDiffOutputWithLabels(differences []
 	return buf.String()
 }
 
-func (ec *EquivalenceChecker) writeUnifiedDiffEntry(buf *strings.Builder, diff PolicyDifference) {
+func (ec *Checker) writeUnifiedDiffEntry(buf *strings.Builder, diff PolicyDifference) {
 	switch diff.Field {
 	case "sources":
 		switch diff.Kind {
@@ -807,7 +807,7 @@ func (ec *EquivalenceChecker) writeUnifiedDiffEntry(buf *strings.Builder, diff P
 
 // ---------- Helpers ----------
 
-func (ec *EquivalenceChecker) bucketKey(b PolicyBucket) string {
+func (ec *Checker) bucketKey(b PolicyBucket) string {
 	// Use names if available, otherwise fall back to URIs
 	if len(b.Names) > 0 {
 		return strings.Join(b.Names, ",")
@@ -815,7 +815,7 @@ func (ec *EquivalenceChecker) bucketKey(b PolicyBucket) string {
 	return strings.Join(b.PolicyURIs, ",") + "|" + strings.Join(b.DataURIs, ",")
 }
 
-func (ec *EquivalenceChecker) diffStringSets(old, new []string) (added, removed []string) {
+func (ec *Checker) diffStringSets(old, new []string) (added, removed []string) {
 	a := map[string]struct{}{}
 	b := map[string]struct{}{}
 	for _, s := range old {
@@ -839,7 +839,7 @@ func (ec *EquivalenceChecker) diffStringSets(old, new []string) (added, removed 
 	return
 }
 
-func (ec *EquivalenceChecker) formatURIs(uris []string) string {
+func (ec *Checker) formatURIs(uris []string) string {
 	if len(uris) == 0 {
 		return "  (none)"
 	}
@@ -850,7 +850,7 @@ func (ec *EquivalenceChecker) formatURIs(uris []string) string {
 	return strings.Join(out, "\n")
 }
 
-func (ec *EquivalenceChecker) ruleDataEqual(d1, d2 map[string]interface{}) (bool, error) {
+func (ec *Checker) ruleDataEqual(d1, d2 map[string]interface{}) (bool, error) {
 	h1, err := ec.hashRuleData(d1)
 	if err != nil {
 		return false, err
@@ -862,7 +862,7 @@ func (ec *EquivalenceChecker) ruleDataEqual(d1, d2 map[string]interface{}) (bool
 	return h1 == h2, nil
 }
 
-func (ec *EquivalenceChecker) hashRuleData(d map[string]interface{}) (string, error) {
+func (ec *Checker) hashRuleData(d map[string]interface{}) (string, error) {
 	cb, err := marshalCanonical(d) // provided by canonical.go
 	if err != nil {
 		return "", fmt.Errorf("canonicalize ruleData: %w", err)
@@ -871,11 +871,11 @@ func (ec *EquivalenceChecker) hashRuleData(d map[string]interface{}) (string, er
 	return fmt.Sprintf("%x", sum), nil
 }
 
-func (ec *EquivalenceChecker) unifiedJSONDiff(a, b map[string]interface{}) (string, error) {
+func (ec *Checker) unifiedJSONDiff(a, b map[string]interface{}) (string, error) {
 	return ec.unifiedJSONDiffWithLabels(a, b, "VSA", "Supplied")
 }
 
-func (ec *EquivalenceChecker) unifiedJSONDiffWithLabels(a, b map[string]interface{}, fromLabel, toLabel string) (string, error) {
+func (ec *Checker) unifiedJSONDiffWithLabels(a, b map[string]interface{}, fromLabel, toLabel string) (string, error) {
 	// Canonicalize then pretty-print to stabilize whitespace and ordering
 	ab, err := marshalCanonical(a)
 	if err != nil {

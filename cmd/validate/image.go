@@ -51,41 +51,44 @@ type imageValidationFunc func(context.Context, app.SnapshotComponent, *app.Snaps
 
 var newOPAEvaluator = evaluator.NewOPAEvaluator
 
+// validateImageData holds all the data for the validate image command
+type validateImageData struct {
+	certificateIdentity         string
+	certificateIdentityRegExp   string
+	certificateOIDCIssuer       string
+	certificateOIDCIssuerRegExp string
+	effectiveTime               string
+	extraRuleData               []string
+	filePath                    string // Deprecated: images replaced this
+	filterType                  string
+	imageRef                    string
+	info                        bool
+	input                       string // Deprecated: images replaced this
+	ignoreRekor                 bool
+	output                      []string
+	outputFile                  string
+	policy                      policy.Policy
+	policyConfiguration         string
+	policySource                string
+	publicKey                   string
+	rekorURL                    string
+	snapshot                    string
+	spec                        *app.SnapshotSpec
+	// Only used to pass the expansion info to the report. Not a cli flag.
+	expansion     *applicationsnapshot.ExpansionInfo
+	strict        bool
+	images        string
+	noColor       bool
+	forceColor    bool
+	workers       int
+	vsaEnabled    bool
+	vsaSigningKey string
+	vsaUpload     []string
+	vsaExpiration time.Duration
+}
+
 func validateImageCmd(validate imageValidationFunc) *cobra.Command {
-	data := struct {
-		certificateIdentity         string
-		certificateIdentityRegExp   string
-		certificateOIDCIssuer       string
-		certificateOIDCIssuerRegExp string
-		effectiveTime               string
-		extraRuleData               []string
-		filePath                    string // Deprecated: images replaced this
-		filterType                  string
-		imageRef                    string
-		info                        bool
-		input                       string // Deprecated: images replaced this
-		ignoreRekor                 bool
-		output                      []string
-		outputFile                  string
-		policy                      policy.Policy
-		policyConfiguration         string
-		policySource                string
-		publicKey                   string
-		rekorURL                    string
-		snapshot                    string
-		spec                        *app.SnapshotSpec
-		// Only used to pass the expansion info to the report. Not a cli flag.
-		expansion     *applicationsnapshot.ExpansionInfo
-		strict        bool
-		images        string
-		noColor       bool
-		forceColor    bool
-		workers       int
-		vsaEnabled    bool
-		vsaSigningKey string
-		vsaUpload     []string
-		vsaExpiration time.Duration
-	}{
+	data := &validateImageData{
 		strict:        true,
 		workers:       5,
 		filterType:    "include-exclude", // Default to include-exclude filter
@@ -200,383 +203,12 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 			    --rekor-url 'https://rekor.sigstore.dev'
 		`),
 
-		PreRunE: func(cmd *cobra.Command, args []string) (allErrors error) {
-			ctx := cmd.Context()
-			if trace.IsEnabled() {
-				var task *trace.Task
-				ctx, task = trace.NewTask(ctx, "ec:validate-image-prepare")
-				defer task.End()
-				cmd.SetContext(ctx)
-			}
-
-			if s, exp, err := applicationsnapshot.DetermineInputSpec(ctx, applicationsnapshot.Input{
-				File:     data.filePath,
-				JSON:     data.input,
-				Image:    data.imageRef,
-				Snapshot: data.snapshot,
-				Images:   data.images,
-			}); err != nil {
-				allErrors = errors.Join(allErrors, err)
-			} else {
-				data.spec = s
-				data.expansion = exp
-			}
-
-			// Store policy source before resolution
-			data.policySource = data.policyConfiguration
-
-			policyConfiguration, err := validate_utils.GetPolicyConfig(ctx, data.policyConfiguration)
-			if err != nil {
-				allErrors = errors.Join(allErrors, err)
-				return
-			}
-			data.policyConfiguration = policyConfiguration
-
-			policyOptions := policy.Options{
-				EffectiveTime: data.effectiveTime,
-				Identity: cosign.Identity{
-					Issuer:        data.certificateOIDCIssuer,
-					IssuerRegExp:  data.certificateOIDCIssuerRegExp,
-					Subject:       data.certificateIdentity,
-					SubjectRegExp: data.certificateIdentityRegExp,
-				},
-				IgnoreRekor: data.ignoreRekor,
-				PolicyRef:   data.policyConfiguration,
-				PublicKey:   data.publicKey,
-				RekorURL:    data.rekorURL,
-			}
-
-			// We're not currently using the policyCache returned from PreProcessPolicy, but we could
-			// use it to cache the policy for future use.
-			if p, _, err := policy.PreProcessPolicy(ctx, policyOptions); err != nil {
-				allErrors = errors.Join(allErrors, err)
-			} else {
-				// inject extra variables into rule data per source
-				if len(data.extraRuleData) > 0 {
-					policySpec := p.Spec()
-					sources := policySpec.Sources
-					for i := range sources {
-						src := sources[i]
-						var rule_data_raw []byte
-						unmarshaled := make(map[string]interface{})
-
-						if src.RuleData != nil {
-							rule_data_raw, err = src.RuleData.MarshalJSON()
-							if err != nil {
-								allErrors = errors.Join(allErrors, fmt.Errorf("unable to parse ruledata to raw data"))
-								continue
-							}
-							err = json.Unmarshal(rule_data_raw, &unmarshaled)
-							if err != nil {
-								allErrors = errors.Join(allErrors, fmt.Errorf("unable to parse ruledata into standard JSON object"))
-								continue
-							}
-						} else {
-							sources[i].RuleData = new(extv1.JSON)
-						}
-
-						for j := range data.extraRuleData {
-							parts := strings.SplitN(data.extraRuleData[j], "=", 2)
-							if len(parts) < 2 {
-								allErrors = errors.Join(allErrors, fmt.Errorf("incorrect syntax for --extra-rule-data %d", j))
-								continue
-							}
-							extraRuleDataPolicyConfig, err := validate_utils.GetPolicyConfig(ctx, parts[1])
-							if err != nil {
-								allErrors = errors.Join(allErrors, fmt.Errorf("unable to load data from extraRuleData: %s", err.Error()))
-								continue
-							}
-							unmarshaled[parts[0]] = extraRuleDataPolicyConfig
-						}
-						rule_data_raw, err = json.Marshal(unmarshaled)
-						if err != nil {
-							allErrors = errors.Join(allErrors, fmt.Errorf("unable to parse updated ruledata: %s", err.Error()))
-							continue
-						}
-
-						if rule_data_raw == nil {
-							allErrors = errors.Join(allErrors, fmt.Errorf("invalid rule data JSON"))
-							continue
-						}
-
-						err = sources[i].RuleData.UnmarshalJSON(rule_data_raw)
-						if err != nil {
-							allErrors = errors.Join(allErrors, fmt.Errorf("unable to marshal updated JSON: %s", err.Error()))
-							continue
-						}
-					}
-					policySpec.Sources = sources
-					p = p.WithSpec(policySpec)
-				}
-				data.policy = p
-			}
-
-			return
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return prepareValidateImageData(cmd, data)
 		},
 
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if trace.IsEnabled() {
-				ctx, task := trace.NewTask(cmd.Context(), "ec:validate-images")
-				cmd.SetContext(ctx)
-				defer task.End()
-			}
-
-			type result struct {
-				err         error
-				component   applicationsnapshot.Component
-				policyInput []byte
-			}
-
-			appComponents := data.spec.Components
-			evaluators := []evaluator.Evaluator{}
-
-			// Return an evaluator for each of these
-			for _, sourceGroup := range data.policy.Spec().Sources {
-				// Todo: Make each fetch run concurrently
-				log.Debugf("Fetching policy source group '%s'", sourceGroup.Name)
-				policySources := source.PolicySourcesFrom(sourceGroup)
-
-				for _, policySource := range policySources {
-					log.Debugf("policySource: %#v", policySource)
-				}
-
-				var c evaluator.Evaluator
-				var err error
-				if utils.IsOpaEnabled() {
-					c, err = newOPAEvaluator()
-				} else {
-					// Use the unified filtering approach with the specified filter type
-					c, err = evaluator.NewConftestEvaluatorWithFilterType(
-						cmd.Context(), policySources, data.policy, sourceGroup, data.filterType)
-				}
-
-				if err != nil {
-					log.Debug("Failed to initialize the conftest evaluator!")
-					return err
-				}
-
-				evaluators = append(evaluators, c)
-				defer c.Destroy()
-			}
-
-			showSuccesses, _ := cmd.Flags().GetBool("show-successes")
-			showWarnings, _ := cmd.Flags().GetBool("show-warnings")
-
-			// worker is responsible for processing one component at a time from the jobs channel,
-			// and for emitting a corresponding result for the component on the results channel.
-			worker := func(id int, jobs <-chan app.SnapshotComponent, results chan<- result) {
-				log.Debugf("Starting worker %d", id)
-				for comp := range jobs {
-					ctx := cmd.Context()
-					var task *trace.Task
-					if trace.IsEnabled() {
-						ctx, task = trace.NewTask(ctx, "ec:validate-component")
-						trace.Logf(ctx, "", "workerID=%d", id)
-					}
-
-					log.Debugf("Worker %d got a component %q", id, comp.ContainerImage)
-
-					// Use VSA-aware validation if VSA checking is enabled and a retriever is available
-					var out *output.Output
-					var err error
-					if data.vsaExpiration > 0 {
-						vsaChecker := vsa.CreateVSACheckerFromUploadFlags(data.vsaUpload)
-						if vsaChecker != nil {
-							out, err = image.ValidateImageWithVSACheck(ctx, comp, data.spec, data.policy, evaluators, data.info, vsaChecker, data.vsaExpiration)
-						} else {
-							// Fall back to normal validation if no VSA retriever is available
-							out, err = validate(ctx, comp, data.spec, data.policy, evaluators, data.info)
-						}
-					} else {
-						// Use original validation when VSA checking is disabled
-						out, err = validate(ctx, comp, data.spec, data.policy, evaluators, data.info)
-					}
-					res := result{
-						err: err,
-						component: applicationsnapshot.Component{
-							SnapshotComponent: comp,
-							Success:           err == nil,
-						},
-					}
-
-					// Skip on err to not panic. Error is return on routine completion.
-					if err == nil {
-						if out != nil {
-							// Normal validation completed
-							res.component.Violations = out.Violations()
-							res.component.Warnings = out.Warnings()
-
-							successes := out.Successes()
-							res.component.SuccessCount = len(successes)
-							if showSuccesses {
-								res.component.Successes = successes
-							}
-
-							res.component.Signatures = out.Signatures
-							// Create a new result object for attestations. The point is to only keep the data that's needed.
-							// For example, the Statement is only needed when the full attestation is printed.
-							for _, att := range out.Attestations {
-								attResult := applicationsnapshot.NewAttestationResult(att)
-								if containsOutput(data.output, "attestation") {
-									attResult.Statement = att.Statement()
-								}
-								res.component.Attestations = append(res.component.Attestations, attResult)
-							}
-							res.component.ContainerImage = out.ImageURL
-							res.policyInput = out.PolicyInput
-						} else {
-							// Validation was skipped due to valid VSA - no violations, no processing needed
-							log.Debugf("Validation skipped for %s due to valid VSA", comp.ContainerImage)
-							res.component.ContainerImage = comp.ContainerImage
-						}
-					}
-					res.component.Success = err == nil && len(res.component.Violations) == 0
-
-					if task != nil {
-						task.End()
-					}
-					results <- res
-				}
-				log.Debugf("Done with worker %d", id)
-			}
-
-			numComponents := len(appComponents)
-
-			// Set numWorkers to the value from our flag. The default is 5.
-			numWorkers := data.workers
-
-			jobs := make(chan app.SnapshotComponent, numComponents)
-			results := make(chan result, numComponents)
-			// Initialize each worker. They will wait patiently until a job is sent to the jobs
-			// channel, or the jobs channel is closed.
-			for i := 0; i <= numWorkers; i++ {
-				go worker(i, jobs, results)
-			}
-			// Initialize all the jobs. Each worker will pick a job from the channel when the worker
-			// is ready to consume a new job.
-			for _, c := range appComponents {
-				jobs <- c
-			}
-			close(jobs)
-
-			var components []applicationsnapshot.Component
-			var manyPolicyInput [][]byte
-			var allErrors error = nil
-			for i := 0; i < numComponents; i++ {
-				r := <-results
-				if r.err != nil {
-					e := fmt.Errorf("error validating image %s of component %s: %w", r.component.ContainerImage, r.component.Name, r.err)
-					allErrors = errors.Join(allErrors, e)
-				} else {
-					components = append(components, r.component)
-					manyPolicyInput = append(manyPolicyInput, r.policyInput)
-				}
-			}
-			close(results)
-			if allErrors != nil {
-				return allErrors
-			}
-
-			// Ensure some consistency in output.
-			sort.Slice(components, func(i, j int) bool {
-				return components[i].ContainerImage > components[j].ContainerImage
-			})
-
-			if len(data.outputFile) > 0 {
-				data.output = append(data.output, fmt.Sprintf("%s=%s", applicationsnapshot.JSON, data.outputFile))
-			}
-
-			report, err := applicationsnapshot.NewReport(data.snapshot, components, data.policy, manyPolicyInput, showSuccesses, showWarnings, data.expansion)
-			if err != nil {
-				return err
-			}
-			p := format.NewTargetParser(applicationsnapshot.JSON, format.Options{ShowSuccesses: showSuccesses, ShowWarnings: showWarnings}, cmd.OutOrStdout(), utils.FS(cmd.Context()))
-			utils.SetColorEnabled(data.noColor, data.forceColor)
-			if err := report.WriteAll(data.output, p); err != nil {
-				return err
-			}
-
-			if data.vsaEnabled {
-				// Use the signer function that supports both file and k8s:// URLs
-				signer, err := vsa.NewSigner(cmd.Context(), data.vsaSigningKey, utils.FS(cmd.Context()))
-				if err != nil {
-					log.Error(err)
-					return err
-				}
-
-				// Create VSA service
-				vsaService := vsa.NewServiceWithFS(signer, utils.FS(cmd.Context()), data.policySource, data.policy)
-
-				// Define helper functions for getting git URL and digest
-				getGitURL := func(comp applicationsnapshot.Component) string {
-					if comp.Source.GitSource != nil {
-						return comp.Source.GitSource.URL
-					}
-					return ""
-				}
-
-				getDigest := func(comp applicationsnapshot.Component) (string, error) {
-					imageRef, err := name.ParseReference(comp.ContainerImage)
-					if err != nil {
-						return "", fmt.Errorf("failed to parse image reference %s: %v", comp.ContainerImage, err)
-					}
-
-					digest, err := oci.NewClient(cmd.Context()).ResolveDigest(imageRef)
-					if err != nil {
-						return "", fmt.Errorf("failed to resolve digest for image %s: %v", comp.ContainerImage, err)
-					}
-
-					return digest, nil
-				}
-
-				// Process all VSAs using the service
-				vsaResult, err := vsaService.ProcessAllVSAs(cmd.Context(), report, getGitURL, getDigest)
-				if err != nil {
-					log.Errorf("Failed to process VSAs: %v", err)
-					// Don't return error here, continue with the rest of the command
-				} else {
-					// Upload VSAs to configured storage backends
-					if len(data.vsaUpload) > 0 {
-						log.Infof("[VSA] Starting upload to %d storage backend(s)", len(data.vsaUpload))
-
-						// Upload component VSA envelopes
-						for imageRef, envelopePath := range vsaResult.ComponentEnvelopes {
-							uploadErr := vsa.UploadVSAEnvelope(cmd.Context(), envelopePath, data.vsaUpload, signer)
-							if uploadErr != nil {
-								log.Errorf("[VSA] Upload failed for component %s: %v", imageRef, uploadErr)
-							} else {
-								log.Infof("[VSA] Uploaded Component VSA")
-							}
-						}
-
-						// Upload snapshot VSA envelope if it exists
-						if vsaResult.SnapshotEnvelope != "" {
-							uploadErr := vsa.UploadVSAEnvelope(cmd.Context(), vsaResult.SnapshotEnvelope, data.vsaUpload, signer)
-							if uploadErr != nil {
-								log.Errorf("[VSA] Upload failed for snapshot: %v", uploadErr)
-							} else {
-								log.Infof("[VSA] Uploaded Snapshot VSA")
-							}
-						}
-					} else {
-						// No upload backends configured - inform user about next steps
-						totalFiles := len(vsaResult.ComponentEnvelopes)
-						if vsaResult.SnapshotEnvelope != "" {
-							totalFiles++
-						}
-
-						if totalFiles > 0 {
-							log.Errorf("[VSA] VSA files generated but not uploaded (no --vsa-upload backends specified)")
-						}
-					}
-				}
-			}
-
-			if data.strict && !report.Success {
-				return errors.New("success criteria not met")
-			}
-
-			return nil
+			return executeValidateImageCommand(cmd, data, validate)
 		},
 	}
 
@@ -681,6 +313,457 @@ func validateImageCmd(validate imageValidationFunc) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// result represents the result of processing a component
+type result struct {
+	err         error
+	component   applicationsnapshot.Component
+	policyInput []byte
+}
+
+// executeValidateImageCommand executes the main validation logic
+func executeValidateImageCommand(cmd *cobra.Command, data *validateImageData, validate imageValidationFunc) error {
+	if trace.IsEnabled() {
+		ctx, task := trace.NewTask(cmd.Context(), "ec:validate-images")
+		cmd.SetContext(ctx)
+		defer task.End()
+	}
+
+	appComponents := data.spec.Components
+	evaluators, err := setupEvaluators(cmd, data)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, evaluator := range evaluators {
+			evaluator.Destroy()
+		}
+	}()
+
+	showSuccesses, _ := cmd.Flags().GetBool("show-successes")
+	showWarnings, _ := cmd.Flags().GetBool("show-warnings")
+
+	components, manyPolicyInput, err := processComponents(cmd, appComponents, data, evaluators, validate, showSuccesses)
+	if err != nil {
+		return err
+	}
+
+	// Ensure some consistency in output.
+	sort.Slice(components, func(i, j int) bool {
+		return components[i].ContainerImage > components[j].ContainerImage
+	})
+
+	if len(data.outputFile) > 0 {
+		data.output = append(data.output, fmt.Sprintf("%s=%s", applicationsnapshot.JSON, data.outputFile))
+	}
+
+	report, err := generateReport(cmd, data, components, manyPolicyInput, showSuccesses, showWarnings)
+	if err != nil {
+		return err
+	}
+
+	if data.vsaEnabled {
+		if err := processVSA(cmd, data, &report); err != nil {
+			return err
+		}
+	}
+
+	if data.strict && !report.Success {
+		return errors.New("success criteria not met")
+	}
+
+	return nil
+}
+
+// processValidationResult processes the validation result and populates the component
+func processValidationResult(res *result, out *output.Output, comp app.SnapshotComponent, data *validateImageData, showSuccesses bool) {
+	if out != nil {
+		// Normal validation completed
+		res.component.Violations = out.Violations()
+		res.component.Warnings = out.Warnings()
+
+		successes := out.Successes()
+		res.component.SuccessCount = len(successes)
+		if showSuccesses {
+			res.component.Successes = successes
+		}
+
+		res.component.Signatures = out.Signatures
+		// Create a new result object for attestations. The point is to only keep the data that's needed.
+		// For example, the Statement is only needed when the full attestation is printed.
+		for _, att := range out.Attestations {
+			attResult := applicationsnapshot.NewAttestationResult(att)
+			if containsOutput(data.output, "attestation") {
+				attResult.Statement = att.Statement()
+			}
+			res.component.Attestations = append(res.component.Attestations, attResult)
+		}
+		res.component.ContainerImage = out.ImageURL
+		res.policyInput = out.PolicyInput
+	} else {
+		// Validation was skipped due to valid VSA - no violations, no processing needed
+		log.Debugf("Validation skipped for %s due to valid VSA", comp.ContainerImage)
+		res.component.ContainerImage = comp.ContainerImage
+	}
+}
+
+// processExtraRuleData processes extra rule data for policy sources
+func processExtraRuleData(p policy.Policy, data *validateImageData) error {
+	if len(data.extraRuleData) == 0 {
+		return nil
+	}
+
+	policySpec := p.Spec()
+	sources := policySpec.Sources
+	for i := range sources {
+		src := sources[i]
+		var rule_data_raw []byte
+		unmarshaled := make(map[string]interface{})
+
+		if src.RuleData != nil {
+			rule_data_raw, err := src.RuleData.MarshalJSON()
+			if err != nil {
+				return fmt.Errorf("unable to parse ruledata to raw data")
+			}
+			err = json.Unmarshal(rule_data_raw, &unmarshaled)
+			if err != nil {
+				return fmt.Errorf("unable to parse ruledata to map")
+			}
+		}
+
+		for _, extraRuleData := range data.extraRuleData {
+			parts := strings.SplitN(extraRuleData, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid extra rule data format: %s", extraRuleData)
+			}
+			key := parts[0]
+			value := parts[1]
+			unmarshaled[key] = value
+		}
+
+		rule_data_raw, err := json.Marshal(unmarshaled)
+		if err != nil {
+			return fmt.Errorf("unable to marshal ruledata")
+		}
+		sources[i].RuleData = &extv1.JSON{Raw: rule_data_raw}
+	}
+	p = p.WithSpec(policySpec)
+	return nil
+}
+
+// setupPolicy configures and processes the policy
+func setupPolicy(ctx context.Context, data *validateImageData) error {
+	policyConfiguration, err := validate_utils.GetPolicyConfig(ctx, data.policyConfiguration)
+	if err != nil {
+		return err
+	}
+	data.policyConfiguration = policyConfiguration
+
+	policyOptions := policy.Options{
+		EffectiveTime: data.effectiveTime,
+		Identity: cosign.Identity{
+			Issuer:        data.certificateOIDCIssuer,
+			IssuerRegExp:  data.certificateOIDCIssuerRegExp,
+			Subject:       data.certificateIdentity,
+			SubjectRegExp: data.certificateIdentityRegExp,
+		},
+		IgnoreRekor: data.ignoreRekor,
+		PolicyRef:   data.policyConfiguration,
+		PublicKey:   data.publicKey,
+		RekorURL:    data.rekorURL,
+	}
+
+	// We're not currently using the policyCache returned from PreProcessPolicy, but we could
+	// use it to cache the policy for future use.
+	p, _, err := policy.PreProcessPolicy(ctx, policyOptions)
+	if err != nil {
+		return err
+	}
+
+	if err := processExtraRuleData(p, data); err != nil {
+		return err
+	}
+	data.policy = p
+
+	return nil
+}
+
+// determineInputSpec determines the input specification for validation
+func determineInputSpec(ctx context.Context, data *validateImageData) error {
+	s, exp, err := applicationsnapshot.DetermineInputSpec(ctx, applicationsnapshot.Input{
+		File:     data.filePath,
+		JSON:     data.input,
+		Image:    data.imageRef,
+		Snapshot: data.snapshot,
+		Images:   data.images,
+	})
+	if err != nil {
+		return err
+	}
+	data.spec = s
+	data.expansion = exp
+	return nil
+}
+
+// generateReport creates and writes the validation report
+func generateReport(cmd *cobra.Command, data *validateImageData, components []applicationsnapshot.Component, manyPolicyInput [][]byte, showSuccesses, showWarnings bool) (applicationsnapshot.Report, error) {
+	report, err := applicationsnapshot.NewReport(data.snapshot, components, data.policy, manyPolicyInput, showSuccesses, showWarnings, data.expansion)
+	if err != nil {
+		return applicationsnapshot.Report{}, err
+	}
+	p := format.NewTargetParser(applicationsnapshot.JSON, format.Options{ShowSuccesses: showSuccesses, ShowWarnings: showWarnings}, cmd.OutOrStdout(), utils.FS(cmd.Context()))
+	utils.SetColorEnabled(data.noColor, data.forceColor)
+	if err := report.WriteAll(data.output, p); err != nil {
+		return applicationsnapshot.Report{}, err
+	}
+	return report, nil
+}
+
+// processComponents processes all components using workers and returns the results
+func processComponents(cmd *cobra.Command, appComponents []app.SnapshotComponent, data *validateImageData, evaluators []evaluator.Evaluator, validate imageValidationFunc, showSuccesses bool) ([]applicationsnapshot.Component, [][]byte, error) {
+	// worker is responsible for processing one component at a time from the jobs channel,
+	// and for emitting a corresponding result for the component on the results channel.
+	worker := func(id int, jobs <-chan app.SnapshotComponent, results chan<- result) {
+		log.Debugf("Starting worker %d", id)
+		for comp := range jobs {
+			ctx := cmd.Context()
+			var task *trace.Task
+			if trace.IsEnabled() {
+				ctx, task = trace.NewTask(ctx, "ec:validate-component")
+				trace.Logf(ctx, "", "workerID=%d", id)
+			}
+
+			log.Debugf("Worker %d got a component %q", id, comp.ContainerImage)
+
+			res := processComponent(ctx, comp, data, evaluators, validate, showSuccesses)
+
+			if task != nil {
+				task.End()
+			}
+			results <- res
+		}
+		log.Debugf("Done with worker %d", id)
+	}
+
+	numComponents := len(appComponents)
+
+	// Set numWorkers to the value from our flag. The default is 5.
+	numWorkers := data.workers
+
+	jobs := make(chan app.SnapshotComponent, numComponents)
+	results := make(chan result, numComponents)
+	// Initialize each worker. They will wait patiently until a job is sent to the jobs
+	// channel, or the jobs channel is closed.
+	for i := 0; i <= numWorkers; i++ {
+		go worker(i, jobs, results)
+	}
+	// Initialize all the jobs. Each worker will pick a job from the channel when the worker
+	// is ready to consume a new job.
+	for _, c := range appComponents {
+		jobs <- c
+	}
+	close(jobs)
+
+	var components []applicationsnapshot.Component
+	var manyPolicyInput [][]byte
+	var allErrors error = nil
+	for i := 0; i < numComponents; i++ {
+		r := <-results
+		if r.err != nil {
+			e := fmt.Errorf("error validating image %s of component %s: %w", r.component.ContainerImage, r.component.Name, r.err)
+			allErrors = errors.Join(allErrors, e)
+		} else {
+			components = append(components, r.component)
+			manyPolicyInput = append(manyPolicyInput, r.policyInput)
+		}
+	}
+	close(results)
+	if allErrors != nil {
+		return nil, nil, allErrors
+	}
+
+	return components, manyPolicyInput, nil
+}
+
+// setupEvaluators creates evaluators for the policy sources
+func setupEvaluators(cmd *cobra.Command, data *validateImageData) ([]evaluator.Evaluator, error) {
+	evaluators := []evaluator.Evaluator{}
+
+	// Return an evaluator for each of these
+	for _, sourceGroup := range data.policy.Spec().Sources {
+		// Todo: Make each fetch run concurrently
+		log.Debugf("Fetching policy source group '%s'", sourceGroup.Name)
+		policySources := source.PolicySourcesFrom(sourceGroup)
+
+		for _, policySource := range policySources {
+			log.Debugf("policySource: %#v", policySource)
+		}
+
+		var c evaluator.Evaluator
+		var err error
+		if utils.IsOpaEnabled() {
+			c, err = newOPAEvaluator()
+		} else {
+			// Use the unified filtering approach with the specified filter type
+			c, err = evaluator.NewConftestEvaluatorWithFilterType(
+				cmd.Context(), policySources, data.policy, sourceGroup, data.filterType)
+		}
+
+		if err != nil {
+			log.Debug("Failed to initialize the conftest evaluator!")
+			return nil, err
+		}
+
+		evaluators = append(evaluators, c)
+	}
+
+	return evaluators, nil
+}
+
+// processComponent processes a single component and returns the result
+func processComponent(ctx context.Context, comp app.SnapshotComponent, data *validateImageData, evaluators []evaluator.Evaluator, validate imageValidationFunc, showSuccesses bool) result {
+	// Use VSA-aware validation if VSA checking is enabled and a retriever is available
+	var out *output.Output
+	var err error
+	if data.vsaExpiration > 0 {
+		vsaChecker := vsa.CreateVSACheckerFromUploadFlags(data.vsaUpload)
+		if vsaChecker != nil {
+			out, err = image.ValidateImageWithVSACheck(ctx, comp, data.spec, data.policy, evaluators, data.info, vsaChecker, data.vsaExpiration)
+		} else {
+			// Fall back to normal validation if no VSA retriever is available
+			out, err = validate(ctx, comp, data.spec, data.policy, evaluators, data.info)
+		}
+	} else {
+		// Use original validation when VSA checking is disabled
+		out, err = validate(ctx, comp, data.spec, data.policy, evaluators, data.info)
+	}
+	res := result{
+		err: err,
+		component: applicationsnapshot.Component{
+			SnapshotComponent: comp,
+			Success:           err == nil,
+		},
+	}
+
+	// Skip on err to not panic. Error is return on routine completion.
+	if err == nil {
+		processValidationResult(&res, out, comp, data, showSuccesses)
+	}
+	res.component.Success = err == nil && len(res.component.Violations) == 0
+
+	return res
+}
+
+// processVSA handles VSA processing and upload
+func processVSA(cmd *cobra.Command, data *validateImageData, report *applicationsnapshot.Report) error {
+	// Use the signer function that supports both file and k8s:// URLs
+	signer, err := vsa.NewSigner(cmd.Context(), data.vsaSigningKey, utils.FS(cmd.Context()))
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+
+	// Create VSA service
+	vsaService := vsa.NewServiceWithFS(signer, utils.FS(cmd.Context()), data.policySource, data.policy)
+
+	// Define helper functions for getting git URL and digest
+	getGitURL := func(comp applicationsnapshot.Component) string {
+		if comp.Source.GitSource != nil {
+			return comp.Source.GitSource.URL
+		}
+		return ""
+	}
+
+	getDigest := func(comp applicationsnapshot.Component) (string, error) {
+		imageRef, err := name.ParseReference(comp.ContainerImage)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse image reference %s: %v", comp.ContainerImage, err)
+		}
+
+		digest, err := oci.NewClient(cmd.Context()).ResolveDigest(imageRef)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve digest for image %s: %v", comp.ContainerImage, err)
+		}
+
+		return digest, nil
+	}
+
+	// Process all VSAs using the service
+	vsaResult, err := vsaService.ProcessAllVSAs(cmd.Context(), *report, getGitURL, getDigest)
+	if err != nil {
+		log.Errorf("Failed to process VSAs: %v", err)
+		// Don't return error here, continue with the rest of the command
+		return nil
+	}
+
+	// Upload VSAs to configured storage backends
+	if len(data.vsaUpload) > 0 {
+		return uploadVSAs(cmd, data, vsaResult, signer)
+	}
+
+	// No upload backends configured - inform user about next steps
+	totalFiles := len(vsaResult.ComponentEnvelopes)
+	if vsaResult.SnapshotEnvelope != "" {
+		totalFiles++
+	}
+
+	if totalFiles > 0 {
+		log.Errorf("[VSA] VSA files generated but not uploaded (no --vsa-upload backends specified)")
+	}
+
+	return nil
+}
+
+// uploadVSAs uploads VSA envelopes to configured storage backends
+func uploadVSAs(cmd *cobra.Command, data *validateImageData, vsaResult *vsa.VSAProcessingResult, signer *vsa.Signer) error {
+	log.Infof("[VSA] Starting upload to %d storage backend(s)", len(data.vsaUpload))
+
+	// Upload component VSA envelopes
+	for imageRef, envelopePath := range vsaResult.ComponentEnvelopes {
+		uploadErr := vsa.UploadVSAEnvelope(cmd.Context(), envelopePath, data.vsaUpload, signer)
+		if uploadErr != nil {
+			log.Errorf("[VSA] Upload failed for component %s: %v", imageRef, uploadErr)
+		} else {
+			log.Infof("[VSA] Uploaded Component VSA")
+		}
+	}
+
+	// Upload snapshot VSA envelope if it exists
+	if vsaResult.SnapshotEnvelope != "" {
+		uploadErr := vsa.UploadVSAEnvelope(cmd.Context(), vsaResult.SnapshotEnvelope, data.vsaUpload, signer)
+		if uploadErr != nil {
+			log.Errorf("[VSA] Upload failed for snapshot: %v", uploadErr)
+		} else {
+			log.Infof("[VSA] Uploaded Snapshot VSA")
+		}
+	}
+
+	return nil
+}
+
+// prepareValidateImageData prepares the data for the validate image command
+func prepareValidateImageData(cmd *cobra.Command, data *validateImageData) error {
+	ctx := cmd.Context()
+	if trace.IsEnabled() {
+		var task *trace.Task
+		ctx, task = trace.NewTask(ctx, "ec:validate-image-prepare")
+		defer task.End()
+		cmd.SetContext(ctx)
+	}
+
+	if err := determineInputSpec(ctx, data); err != nil {
+		return err
+	}
+
+	// Store policy source before resolution
+	data.policySource = data.policyConfiguration
+
+	if err := setupPolicy(ctx, data); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // find if the slice contains "value" output

@@ -107,6 +107,19 @@ var rootArgs = []string{
 }
 
 func happyValidator() imageValidationFunc {
+	return createTestValidator([]evaluator.Result{
+		{
+			Message: "Pass",
+			Metadata: map[string]interface{}{
+				"code":  "policy.nice",
+				"title": "Very nice",
+			},
+		},
+	}, nil)
+}
+
+// createTestValidator creates a test validator with the given successes and warnings
+func createTestValidator(successes []evaluator.Result, warnings []evaluator.Result) imageValidationFunc {
 	return func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
 		return &output.Output{
 			ImageSignatureCheck: output.VerificationStatus{
@@ -125,15 +138,8 @@ func happyValidator() imageValidationFunc {
 				{
 					FileName:  "test.json",
 					Namespace: "test.main",
-					Successes: []evaluator.Result{
-						{
-							Message: "Pass",
-							Metadata: map[string]interface{}{
-								"code":  "policy.nice",
-								"title": "Very nice",
-							},
-						},
-					},
+					Successes: successes,
+					Warnings:  warnings,
 				},
 			},
 			ImageURL: component.ContainerImage,
@@ -1382,48 +1388,37 @@ func TestValidateImageDefaultOutput(t *testing.T) {
 
 // TestContainsData validates containsData behavior
 func TestContainsData(t *testing.T) {
-	tests := []struct {
-		input    []string
-		expected bool
-		name     string
-	}{
-		{[]string{"data"}, true, "Match single data"},
-		{[]string{"data=something"}, true, "Match data=something"},
-		{[]string{"text=data-file.txt"}, false, "Do not match text=data-file.txt"},
-		{[]string{"json", "data=custom-data.yaml"}, true, "Match data in slice with multiple values"},
-		{[]string{"data text"}, false, "Do not match data text"},
-		{[]string{"dat"}, false, "Do not match dat"},
-		{[]string{"data123"}, false, "Do not match data123"},
-		{[]string{"data="}, true, "Match data="},
-		{[]string{""}, false, "Do not match empty string"},
-	}
+	testContainsOutput(t, "data", getContainsTestCases("data"))
+}
 
+func TestContainsAttestation(t *testing.T) {
+	testContainsOutput(t, "attestation", getContainsTestCases("attestation"))
+}
+
+type testCase struct {
+	input    []string
+	expected bool
+	name     string
+}
+
+func testContainsOutput(t *testing.T, keyword string, tests []testCase) {
 	for _, test := range tests {
-		result := containsOutput(test.input, "data")
+		result := containsOutput(test.input, keyword)
 		assert.Equal(t, test.expected, result, test.name)
 	}
 }
 
-func TestContainsAttestation(t *testing.T) {
-	tests := []struct {
-		input    []string
-		expected bool
-		name     string
-	}{
-		{[]string{"attestation"}, true, "Match single attestation"},
-		{[]string{"attestation=some-file.att"}, true, "Match attestation=some-file.att"},
-		{[]string{"meta=attestation.json"}, false, "Do not match meta=attestation.json"},
-		{[]string{"config", "attestation=custom-attestation.yaml"}, true, "Match attestation in slice with multiple values"},
-		{[]string{"attestation text"}, false, "Do not match attestation text"},
-		{[]string{"attest"}, false, "Do not match attest"},
-		{[]string{"attestation123"}, false, "Do not match attestation123"},
-		{[]string{"attestation="}, true, "Match attestation="},
+func getContainsTestCases(keyword string) []testCase {
+	return []testCase{
+		{[]string{keyword}, true, fmt.Sprintf("Match single %s", keyword)},
+		{[]string{keyword + "=something"}, true, fmt.Sprintf("Match %s=something", keyword)},
+		{[]string{"text=" + keyword + "-file.txt"}, false, fmt.Sprintf("Do not match text=%s-file.txt", keyword)},
+		{[]string{"json", keyword + "=custom-" + keyword + ".yaml"}, true, fmt.Sprintf("Match %s in slice with multiple values", keyword)},
+		{[]string{keyword + " text"}, false, fmt.Sprintf("Do not match %s text", keyword)},
+		{[]string{keyword[:len(keyword)-1]}, false, fmt.Sprintf("Do not match %s", keyword[:len(keyword)-1])},
+		{[]string{keyword + "123"}, false, fmt.Sprintf("Do not match %s123", keyword)},
+		{[]string{keyword + "="}, true, fmt.Sprintf("Match %s=", keyword)},
 		{[]string{""}, false, "Do not match empty string"},
-	}
-
-	for _, test := range tests {
-		result := containsOutput(test.input, "attestation")
-		assert.Equal(t, test.expected, result, test.name)
 	}
 }
 
@@ -1541,39 +1536,15 @@ func TestValidateImageCommand_VSAUpload_NoStorageBackends(t *testing.T) {
 
 func TestValidateImageCommand_ShowWarningsFlag(t *testing.T) {
 	// Create a validator that returns warnings
-	warningValidator := func(_ context.Context, component app.SnapshotComponent, _ *app.SnapshotSpec, _ policy.Policy, _ []evaluator.Evaluator, _ bool) (*output.Output, error) {
-		return &output.Output{
-			ImageSignatureCheck: output.VerificationStatus{
-				Passed: true,
+	warningValidator := createTestValidator(nil, []evaluator.Result{
+		{
+			Message: "This is a warning message",
+			Metadata: map[string]interface{}{
+				"code":  "warning.test",
+				"title": "Test Warning",
 			},
-			ImageAccessibleCheck: output.VerificationStatus{
-				Passed: true,
-			},
-			AttestationSignatureCheck: output.VerificationStatus{
-				Passed: true,
-			},
-			AttestationSyntaxCheck: output.VerificationStatus{
-				Passed: true,
-			},
-			PolicyCheck: []evaluator.Outcome{
-				{
-					FileName:  "test.json",
-					Namespace: "test.main",
-					Warnings: []evaluator.Result{
-						{
-							Message: "This is a warning message",
-							Metadata: map[string]interface{}{
-								"code":  "warning.test",
-								"title": "Test Warning",
-							},
-						},
-					},
-				},
-			},
-			ImageURL: component.ContainerImage,
-			ExitCode: 0,
-		}, nil
-	}
+		},
+	})
 
 	cases := []struct {
 		name             string

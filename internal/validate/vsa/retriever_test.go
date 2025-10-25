@@ -31,7 +31,7 @@ func TestCreateVSARetriever(t *testing.T) {
 		vsaIdentifier  string
 		images         string
 		expectError    bool
-		checkRetriever func(t *testing.T, retriever VSARetriever)
+		checkRetriever func(t *testing.T, retriever Retriever)
 	}{
 		{
 			name:          "explicit rekor retrieval",
@@ -39,7 +39,7 @@ func TestCreateVSARetriever(t *testing.T) {
 			vsaIdentifier: "",
 			images:        "",
 			expectError:   false,
-			checkRetriever: func(t *testing.T, retriever VSARetriever) {
+			checkRetriever: func(t *testing.T, retriever Retriever) {
 				assert.NotNil(t, retriever)
 			},
 		},
@@ -56,7 +56,7 @@ func TestCreateVSARetriever(t *testing.T) {
 			vsaIdentifier: "/path/to/vsa.json",
 			images:        "",
 			expectError:   false,
-			checkRetriever: func(t *testing.T, retriever VSARetriever) {
+			checkRetriever: func(t *testing.T, retriever Retriever) {
 				assert.NotNil(t, retriever)
 			},
 		},
@@ -66,7 +66,7 @@ func TestCreateVSARetriever(t *testing.T) {
 			vsaIdentifier: "sha256:abc123def456789",
 			images:        "",
 			expectError:   false,
-			checkRetriever: func(t *testing.T, retriever VSARetriever) {
+			checkRetriever: func(t *testing.T, retriever Retriever) {
 				assert.NotNil(t, retriever)
 			},
 		},
@@ -76,7 +76,7 @@ func TestCreateVSARetriever(t *testing.T) {
 			vsaIdentifier: "registry.io/repo:tag",
 			images:        "",
 			expectError:   false,
-			checkRetriever: func(t *testing.T, retriever VSARetriever) {
+			checkRetriever: func(t *testing.T, retriever Retriever) {
 				assert.NotNil(t, retriever)
 			},
 		},
@@ -86,7 +86,7 @@ func TestCreateVSARetriever(t *testing.T) {
 			vsaIdentifier: "",
 			images:        "snapshot.yaml",
 			expectError:   false,
-			checkRetriever: func(t *testing.T, retriever VSARetriever) {
+			checkRetriever: func(t *testing.T, retriever Retriever) {
 				assert.NotNil(t, retriever)
 			},
 		},
@@ -96,7 +96,7 @@ func TestCreateVSARetriever(t *testing.T) {
 			vsaIdentifier: "",
 			images:        "",
 			expectError:   false,
-			checkRetriever: func(t *testing.T, retriever VSARetriever) {
+			checkRetriever: func(t *testing.T, retriever Retriever) {
 				assert.NotNil(t, retriever)
 			},
 		},

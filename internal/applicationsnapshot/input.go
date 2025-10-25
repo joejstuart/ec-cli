@@ -94,78 +94,32 @@ func DetermineInputSpec(ctx context.Context, input Input) (*app.SnapshotSpec, *E
 	var snapshot snapshot
 	provided := false
 
-	if input.Images != "" {
-		var content []byte
-		var err error
-		fs := utils.FS(ctx)
-		content, err = afero.ReadFile(fs, input.Images)
-		if err != nil {
-			log.Debugf("could not read images from file: %v", err)
-			// could not read as file so expecting string
-			content = []byte(input.Images)
-		}
-
-		file, err := readSnapshotSource(content)
-		if err != nil {
-			return nil, nil, err
-		}
-		snapshot.merge(file)
+	// Process different input sources
+	if processed, err := processImagesInput(ctx, input.Images, &snapshot); err != nil {
+		return nil, nil, err
+	} else if processed {
 		provided = true
 	}
 
-	// read Snapshot provided as a file
-	if input.File != "" {
-		fs := utils.FS(ctx)
-		content, err := afero.ReadFile(fs, input.File)
-		if err != nil {
-			return nil, nil, err
-		}
-		file, err := readSnapshotSource(content)
-		if err != nil {
-			return nil, nil, err
-		}
-		snapshot.merge(file)
+	if processed, err := processFileInput(ctx, input.File, &snapshot); err != nil {
+		return nil, nil, err
+	} else if processed {
 		provided = true
 	}
 
-	// read Snapshot provided as a string
-	if input.JSON != "" {
-		json, err := readSnapshotSource([]byte(input.JSON))
-		if err != nil {
-			return nil, nil, err
-		}
-		snapshot.merge(json)
+	if processed, err := processJSONInput(input.JSON, &snapshot); err != nil {
+		return nil, nil, err
+	} else if processed {
 		provided = true
 	}
 
-	// create Snapshot with a single image
-	if input.Image != "" {
-		log.Debugf("Generating application snapshot from image reference %s", input.Image)
-		imageSnapshot := app.SnapshotSpec{
-			Components: []app.SnapshotComponent{
-				{
-					Name:           unnamed,
-					ContainerImage: input.Image,
-				},
-			},
-		}
-		snapshot.merge(imageSnapshot)
+	if processImageInput(input.Image, &snapshot) {
 		provided = true
 	}
 
-	if input.Snapshot != "" {
-		client, err := kubernetes.NewClient(ctx)
-		if err != nil {
-			log.Debugf("Unable to initialize Kubernetes Client: %v", err)
-			return nil, nil, err
-		}
-
-		cluster, err := client.FetchSnapshot(ctx, input.Snapshot)
-		if err != nil {
-			log.Debugf("Unable to fetch snapshot %s from Kubernetes cluster: %v", input.Snapshot, err)
-			return nil, nil, err
-		}
-		snapshot.merge(cluster.Spec)
+	if processed, err := processSnapshotInput(ctx, input.Snapshot, &snapshot); err != nil {
+		return nil, nil, err
+	} else if processed {
 		provided = true
 	}
 
@@ -173,10 +127,8 @@ func DetermineInputSpec(ctx context.Context, input Input) (*app.SnapshotSpec, *E
 		log.Debug("No application snapshot available")
 		return nil, nil, errors.New("neither Snapshot nor image reference provided to validate")
 	}
-	exp := expandImageIndex(ctx, &snapshot.SnapshotSpec)
 
-	// Store expansion info in the snapshot for later use
-	// This will be used when building the Report
+	exp := expandImageIndex(ctx, &snapshot.SnapshotSpec)
 	snapshot.Expansion = exp
 
 	return &snapshot.SnapshotSpec, exp, nil
@@ -316,4 +268,101 @@ func imageWorkers() int {
 		}
 	}
 	return workers
+}
+
+// processImagesInput processes the Images input field
+func processImagesInput(ctx context.Context, images string, snapshot *snapshot) (bool, error) {
+	if images == "" {
+		return false, nil
+	}
+
+	var content []byte
+	var err error
+	fs := utils.FS(ctx)
+	content, err = afero.ReadFile(fs, images)
+	if err != nil {
+		log.Debugf("could not read images from file: %v", err)
+		// could not read as file so expecting string
+		content = []byte(images)
+	}
+
+	file, err := readSnapshotSource(content)
+	if err != nil {
+		return false, err
+	}
+	snapshot.merge(file)
+	return true, nil
+}
+
+// processFileInput processes the File input field
+func processFileInput(ctx context.Context, file string, snapshot *snapshot) (bool, error) {
+	if file == "" {
+		return false, nil
+	}
+
+	fs := utils.FS(ctx)
+	content, err := afero.ReadFile(fs, file)
+	if err != nil {
+		return false, err
+	}
+	fileSpec, err := readSnapshotSource(content)
+	if err != nil {
+		return false, err
+	}
+	snapshot.merge(fileSpec)
+	return true, nil
+}
+
+// processJSONInput processes the JSON input field
+func processJSONInput(json string, snapshot *snapshot) (bool, error) {
+	if json == "" {
+		return false, nil
+	}
+
+	jsonSpec, err := readSnapshotSource([]byte(json))
+	if err != nil {
+		return false, err
+	}
+	snapshot.merge(jsonSpec)
+	return true, nil
+}
+
+// processImageInput processes the Image input field
+func processImageInput(image string, snapshot *snapshot) bool {
+	if image == "" {
+		return false
+	}
+
+	log.Debugf("Generating application snapshot from image reference %s", image)
+	imageSnapshot := app.SnapshotSpec{
+		Components: []app.SnapshotComponent{
+			{
+				Name:           unnamed,
+				ContainerImage: image,
+			},
+		},
+	}
+	snapshot.merge(imageSnapshot)
+	return true
+}
+
+// processSnapshotInput processes the Snapshot input field
+func processSnapshotInput(ctx context.Context, snapshotName string, snapshot *snapshot) (bool, error) {
+	if snapshotName == "" {
+		return false, nil
+	}
+
+	client, err := kubernetes.NewClient(ctx)
+	if err != nil {
+		log.Debugf("Unable to initialize Kubernetes Client: %v", err)
+		return false, err
+	}
+
+	cluster, err := client.FetchSnapshot(ctx, snapshotName)
+	if err != nil {
+		log.Debugf("Unable to fetch snapshot %s from Kubernetes cluster: %v", snapshotName, err)
+		return false, err
+	}
+	snapshot.merge(cluster.Spec)
+	return true, nil
 }

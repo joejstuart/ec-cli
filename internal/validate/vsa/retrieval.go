@@ -23,8 +23,8 @@ import (
 	ssldsse "github.com/secure-systems-lab/go-securesystemslib/dsse"
 )
 
-// VSARetriever defines the interface for retrieving VSA records from various sources
-type VSARetriever interface {
+// Retriever defines the interface for retrieving VSA records from various sources
+type Retriever interface {
 	// RetrieveVSA retrieves VSA data as a DSSE envelope for a given identifier
 	// The identifier can be a digest, image reference, file path, or any other string
 	// that the specific retriever implementation understands

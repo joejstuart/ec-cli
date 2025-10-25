@@ -208,11 +208,11 @@ func (r *Report) toFormat(format string) (data []byte, err error) {
 	case Summary:
 		data, err = json.Marshal(r.toSummary())
 	case SummaryMarkdown:
-		data, err = generateMarkdownSummary(r)
+		data = generateMarkdownSummary(r)
 	case JUnit:
 		data, err = xml.Marshal(r.toJUnit())
 	case Attestation:
-		data, err = r.renderAttestations()
+		data = r.renderAttestations()
 	case PolicyInput:
 		data = bytes.Join(r.PolicyInput, []byte("\n"))
 	case VSA:
@@ -290,7 +290,7 @@ func condensedMsg(results []evaluator.Result) map[string][]string {
 	return shortNames
 }
 
-func generateMarkdownSummary(r *Report) ([]byte, error) {
+func generateMarkdownSummary(r *Report) []byte {
 	var markdownBuffer bytes.Buffer
 	markdownBuffer.WriteString("| Field     | Value |Status|\n")
 	markdownBuffer.WriteString("|-----------|-------|-------|\n")
@@ -315,7 +315,7 @@ func generateMarkdownSummary(r *Report) ([]byte, error) {
 	writeMarkdownField(&markdownBuffer, "Failures", totalViolations, writeIcon(totalViolations == 0))
 	writeMarkdownField(&markdownBuffer, "Warnings", totalWarnings, writeIcon(totalWarnings == 0))
 	writeMarkdownField(&markdownBuffer, "Result", "", writeIcon(r.Success))
-	return markdownBuffer.Bytes(), nil
+	return markdownBuffer.Bytes()
 }
 
 //go:embed templates/*.tmpl
